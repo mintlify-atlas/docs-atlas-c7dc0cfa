@@ -1,0 +1,248 @@
+---
+title: "Convoy workflow"
+description: "Direct control over work distribution using convoys — the primary work-order unit that bundles related beads and tracks them to completion."
+---
+
+## What is a convoy?
+
+A convoy is a persistent tracking unit that monitors related beads across one or more rigs. When you kick off work — even a single issue — a convoy tracks it so you can see when it lands, who worked on it, and what was included.
+
+```
+🚚 Convoy (hq-cv-abc)
+        │
+  ┌─────┼─────┐
+  ▼     ▼     ▼
+gt-xyz  gt-def  bd-abc
+  │       │       │
+  ▼       ▼       ▼
+ nux   furiosa  amber
+(polecats — the swarm)
+```
+
+The convoy is permanent and has a `hq-cv-*` ID. The polecats working its issues are ephemeral — they form the "swarm" while work is in progress, then dissolve when issues close.
+
+## Convoy states
+
+| State | Description |
+|-------|-------------|
+| `open` | Active — work is in progress |
+| `closed` | All tracked beads are closed; notification sent |
+
+Adding beads to a closed convoy reopens it automatically.
+
+## Mayor vs. manual convoy workflow
+
+<Tabs>
+  <Tab title="Mayor-orchestrated">
+    The Mayor creates and manages convoys on your behalf. You describe a goal; the Mayor handles bead selection, convoy creation, and agent assignment.
+
+    ```bash
+    # Start the Mayor
+    gt mayor attach
+
+    # In the Mayor session, describe your goal
+    # The Mayor runs something like:
+    gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify --human
+
+    # Track progress
+    gt convoy list
+    ```
+
+    Best for complex or multi-rig work where you want the Mayor to make agent assignment decisions.
+  </Tab>
+  <Tab title="Manual">
+    You create convoys directly, add beads, and assign them to agents with `gt sling`.
+
+    ```bash
+    # Create a convoy manually
+    gt convoy create "Bug Fixes" gt-m3k9p gt-w5t2x --human
+
+    # Or create an empty convoy, then add beads
+    gt convoy create "Sprint 14"
+    gt convoy add hq-cv-abc gt-m3k9p gt-w5t2x
+
+    # Assign work to agents
+    gt sling gt-m3k9p myproject
+    gt sling gt-w5t2x myproject/amber
+
+    # Check status
+    gt convoy list
+    gt convoy show hq-cv-abc
+    ```
+
+    Best for direct control over which agent handles which bead.
+  </Tab>
+</Tabs>
+
+## Creating convoys
+
+### From a list of beads
+
+```bash
+gt convoy create "Feature X" gt-abc12 gt-def34 --notify --human
+```
+
+- `--notify --human` sends a notification to you when the convoy lands
+- `--notify mayor/` sends the notification to the Mayor instead
+- Convoy IDs use the `hq-cv-*` prefix (they live in the town-level bead store)
+
+### From an epic
+
+Auto-discover all child beads from an existing epic:
+
+```bash
+gt convoy create --from-epic gt-epic-abc
+gt convoy create --from-epic gt-epic-abc "Custom name"
+```
+
+This BFS-walks the epic's parent-child hierarchy and tracks all slingable leaf items (tasks, bugs, features, chores). Sub-epics and decisions are recursed into but not tracked directly.
+
+### Adding beads to an existing convoy
+
+```bash
+gt convoy add hq-cv-abc gt-new-issue
+gt convoy add hq-cv-abc gt-issue1 gt-issue2 gt-issue3
+```
+
+To add beads to a closed convoy, reopen it first:
+
+```bash
+bd update hq-cv-abc --status=open
+gt convoy add hq-cv-abc gt-followup-fix
+```
+
+## Slinging work to agents
+
+`gt sling` assigns a bead to an agent in a rig. It hooks the bead to the agent's sandbox, and the agent picks it up at next session start via `gt prime`.
+
+```bash
+# Sling a bead to a rig (auto-selects an idle polecat)
+gt sling gt-abc12 myproject
+
+# Sling to a specific agent
+gt sling gt-abc12 myproject/amber
+
+# Override the agent runtime for this spawn
+gt sling gt-abc12 myproject --agent cursor
+
+# Sling an entire convoy (dispatches all open tracked beads)
+gt sling hq-cv-abc
+
+# Sling an epic (dispatches all children)
+gt sling gt-epic-123
+```
+
+<Note>
+If you sling a bead without an existing convoy, Gas Town auto-creates one named `Work: <bead-id>` so the work appears in the dashboard. Even a swarm of one gets convoy visibility.
+</Note>
+
+## Tracking convoy progress
+
+### List all active convoys
+
+```bash
+gt convoy list
+gt convoy list --all              # Include landed convoys
+gt convoy list --status=closed    # Only landed convoys
+gt convoy list --json             # JSON output
+```
+
+Example output:
+```
+Convoys
+
+  🚚 hq-cv-w3nm6: Feature X ●
+  🚚 hq-cv-abc12: Bug fixes ●
+
+Use 'gt convoy status <id>' for detailed view.
+```
+
+### Inspect a specific convoy
+
+```bash
+gt convoy show hq-cv-abc
+gt convoy status hq-cv-abc
+```
+
+Example output:
+```
+🚚 hq-cv-abc: Deploy v2.0
+
+  Status:    ●
+  Progress:  2/4 completed
+  Created:   2025-12-30T10:15:00-08:00
+
+  Tracked Issues:
+    ✓ gt-xyz: Update API endpoint [task]
+    ✓ bd-abc: Fix validation [bug]
+    ○ bd-ghi: Update docs [task]
+    ○ gt-jkl: Deploy to prod [task]
+```
+
+### Convoy vs. rig status
+
+| Command | Scope | Shows |
+|---------|-------|-------|
+| `gt convoy show [id]` | Cross-rig | Beads tracked by convoy + active workers |
+| `gt rig status <rig>` | Single rig | All workers in rig + their convoy membership |
+
+Use convoy status for "what's the status of this batch of work?" Use rig status for "what's everyone in this rig working on?"
+
+## How polecats submit completed work
+
+When a polecat finishes its assigned bead, it runs `gt done`:
+
+```bash
+# Run by the polecat inside its session
+gt done
+```
+
+This triggers the cleanup pipeline:
+
+1. Polecat pushes its branch and creates a merge request bead
+2. Polecat sends `POLECAT_DONE` mail to the rig's Witness
+3. Witness verifies the work is clean and forwards to the Refinery
+4. Refinery batches the MR with others, runs verification gates, and squash-merges to main
+5. The source bead closes, which updates the convoy's progress counter
+6. When all tracked beads close, the convoy lands and notifies subscribers
+
+Polecats never push directly to main — all merges go through the Refinery's bisecting queue.
+
+## Integration branches and the merge queue
+
+The Refinery manages a Bors-style merge queue for polecat work:
+
+```bash
+# Inspect the merge queue (run from inside a rig)
+gt mq integration create    # Create an integration branch for testing
+gt mq integration land      # Land the integration branch to main
+```
+
+The Refinery handles the queue automatically. You only need these commands if you're manually managing integration branches.
+
+## Cross-rig convoys
+
+Convoys live at the town level (`hq-cv-*`) and can track beads from any rig:
+
+```bash
+gt convoy create "Full-stack feature" \
+  gt-frontend-abc \
+  gt-backend-def \
+  bd-docs-xyz
+```
+
+The tracking relation is non-blocking (it doesn't affect the beads' own workflow), additive (you can add beads at any time), and cross-rig (convoy in `hq-*`, beads in `gt-*`, `bd-*`, etc.).
+
+## Convoy commands reference
+
+| Command | Description |
+|---------|-------------|
+| `gt convoy create <name> [beads...]` | Create a convoy, optionally tracking beads |
+| `gt convoy create --from-epic <id>` | Create from an epic's child beads |
+| `gt convoy add <convoy-id> <bead-id...>` | Add beads to an existing convoy |
+| `gt convoy list` | List active convoys |
+| `gt convoy list --all` | List all convoys including landed |
+| `gt convoy show [id]` | Show convoy details and progress |
+| `gt convoy status [id]` | Alias for `gt convoy show` |
+| `gt sling <bead-id> <rig>` | Assign a bead to an agent in a rig |
+| `gt sling <convoy-id>` | Sling all open beads in a convoy |

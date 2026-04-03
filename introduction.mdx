@@ -1,0 +1,78 @@
+---
+title: "Introduction"
+description: "Gas Town is a multi-agent workspace manager that coordinates AI coding agents with persistent, git-backed work state."
+---
+
+Gas Town lets you run 20–30 AI coding agents — Claude Code, GitHub Copilot, Codex, Gemini, and others — working in parallel across your projects. Instead of losing context when agents restart, Gas Town persists all work state in git-backed hooks, enabling reliable multi-agent workflows at scale.
+
+## What problem does this solve?
+
+| Challenge | Gas Town solution |
+|-----------|------------------|
+| Agents lose context on restart | Work persists in git-backed hooks |
+| Manual agent coordination | Built-in mailboxes, identities, and handoffs |
+| 4–10 agents become chaotic | Scale comfortably to 20–30 agents |
+| Work state lost in agent memory | Work state stored in Beads ledger |
+
+## Architecture
+
+Gas Town organizes your workspace as a **Town** — a top-level directory (e.g., `~/gt/`) containing one or more **Rigs**, each wrapping a git repository. The **Mayor** AI coordinator sits at the town level with visibility across all rigs, while **Polecats** (worker agents) operate inside rigs in isolated git worktrees. **Hooks** provide each agent with a persistent work queue that survives crashes and restarts.
+
+```
+Town (~/gt/)
+├── Mayor          — AI coordinator: orchestrates all rigs
+├── Deacon         — Background supervisor: cross-rig health patrol
+├── Rig: Project A — git repo + agents
+│   ├── Crew       — your personal workspace
+│   ├── Hooks      — persistent agent work queues (git worktrees)
+│   ├── Polecats   — ephemeral worker agents
+│   ├── Witness    — per-rig health monitor
+│   └── Refinery   — merge queue processor
+└── Rig: Project B
+    └── ...
+```
+
+Work items are called **Beads** — git-backed atomic records stored in [Dolt](https://github.com/dolthub/dolt). Related beads are grouped into **Convoys** for coordinated delivery.
+
+## Core concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Town** | Your workspace root (e.g., `~/gt/`). Houses all projects and town-level agents. |
+| **Rig** | A project container wrapping a git repository with its own agents and hooks. |
+| **Mayor** | Your primary AI coordinator. Has visibility across all rigs; start here. |
+| **Polecat** | Worker agent with persistent identity but ephemeral sessions. Spawned for tasks; identity and work history accumulate across assignments. |
+| **Hook** | A git worktree-based persistent work queue for each agent. Work on a hook survives restarts. |
+| **Convoy** | A work-order grouping related Beads. Tracks coordinated delivery across agents. |
+| **Bead** | A git-backed atomic work unit (issue, task, or epic) stored in the Beads ledger. |
+| **Witness** | Per-rig patrol agent that monitors Polecats, detects stuck sessions, and triggers recovery. |
+| **Deacon** | Town-level supervisor running continuous patrol cycles across all rigs. |
+| **Refinery** | Per-rig merge queue processor. Batches Polecat branches, runs verification, and merges to main. |
+
+<Note>
+Bead IDs use a prefix plus a 5-character alphanumeric format — for example, `gt-abc12` or `hq-x7k2m`. The prefix indicates the bead's origin rig. The terms "bead" and "issue" are interchangeable.
+</Note>
+
+## The GUPP principle
+
+Gas Town is built on **GUPP** — the Gas Town Universal Propulsion Principle: _"If there is work on your Hook, you must run it."_ This drives autonomous operation: agents do not wait for external prompts when work is available.
+
+## How a typical workflow runs
+
+1. You tell the Mayor what you want to build.
+2. The Mayor breaks the goal into Beads and creates a Convoy.
+3. The Mayor spawns Polecats and slings Beads to their Hooks.
+4. Polecats work autonomously; state persists in git even across restarts.
+5. Completed branches go through the Refinery's merge queue before landing on `main`.
+6. The Mayor reports progress via `gt convoy list`.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the `gt` CLI and set up your first workspace.
+  </Card>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Go from zero to running your first agent in under 5 minutes.
+  </Card>
+</CardGroup>

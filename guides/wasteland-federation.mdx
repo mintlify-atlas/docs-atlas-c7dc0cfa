@@ -1,0 +1,247 @@
+---
+title: "Wasteland federation"
+description: "Federated work coordination linking Gas Towns via DoltHub — browse, claim, and submit work to earn portable reputation."
+---
+
+The Wasteland is a federated work coordination network linking Gas Towns through [DoltHub](https://www.dolthub.com). Rigs post work items to a shared wanted board, claim tasks from other towns, submit completion evidence, and earn portable reputation via multi-dimensional stamps — all backed by a Dolt database with full Git semantics.
+
+Why participate? The Wasteland creates a permanent, evidence-traced record of your contributions. Reputation is portable across wastelands and is not limited to code — documentation, design, RFCs, and bug fixes all count.
+
+<Warning>
+  **Status: Phase 1 (wild-west mode)** — All operations (claims, posts, completions) write directly to your local fork of the commons database. There is no trust-level enforcement yet — any registered rig can browse, claim, post, and submit. Future phases will introduce DoltHub PR-based workflows and trust gating.
+</Warning>
+
+## What the Wasteland is
+
+The Wasteland has three core concepts:
+
+**Wanted board** — A shared list of open work. Any joined rig can post items and claim them. Items carry a title, project, type, priority, effort estimate, and lifecycle status (`open` → `claimed` → `in_review` → `completed`).
+
+**Rig identity** — In Wasteland context, a rig is your participant identity (distinct from Gas Town rigs, which are project containers). Your DoltHub org name becomes your rig handle. Every claim, completion, and stamp is attributed to your rig.
+
+**Reputation via stamps** — When a validator reviews your completed work, they issue a stamp — a multi-dimensional attestation covering quality, reliability, and creativity. Stamps accumulate into portable reputation that travels with your rig across wastelands. The yearbook rule applies: you cannot stamp your own work.
+
+---
+
+## Prerequisites
+
+| Requirement | Check | Setup |
+|-------------|-------|-------|
+| Gas Town | `gt version` | See the installation guide |
+| Dolt 1.82.4+ | `dolt version` | [dolthub/dolt](https://github.com/dolthub/dolt) |
+| DoltHub account | — | [dolthub.com/signin](https://www.dolthub.com/signin) |
+| DoltHub API token | — | [dolthub.com/settings/tokens](https://www.dolthub.com/settings/tokens) |
+
+### Set environment variables
+
+Add these to your shell configuration (`~/.bashrc`, `~/.zshrc`, or equivalent):
+
+```bash
+export DOLTHUB_ORG="your-dolthub-username"
+export DOLTHUB_TOKEN="dhat.v1.your-token-here"
+```
+
+`DOLTHUB_ORG` is your DoltHub username or organization name. This becomes your rig handle and the destination for your fork of the commons database.
+
+---
+
+## Joining the Wasteland
+
+<Steps>
+  <Step title="Authenticate Dolt">
+    Before joining, authenticate the `dolt` CLI with your DoltHub account:
+
+    ```bash
+    dolt login
+    ```
+  </Step>
+  <Step title="Join from your Gas Town workspace">
+    Run the join command from your Gas Town workspace directory:
+
+    ```bash
+    cd ~/gt
+    gt wl join hop/wl-commons
+    ```
+
+    `hop` is the DoltHub organization hosting the default Wasteland commons. The argument is a DoltHub path in `org/database` format.
+
+    Optional flags:
+    - `--handle <name>` — use a custom rig handle instead of your `DOLTHUB_ORG`
+    - `--display-name <name>` — set a human-readable display name in the rig registry
+
+    This command:
+    1. **Forks** `hop/wl-commons` to your DoltHub org
+    2. **Clones** the fork locally into your workspace
+    3. **Registers** your rig in the shared `rigs` table
+    4. **Pushes** the registration to your fork
+    5. **Saves** wasteland configuration to `mayor/wasteland.json`
+  </Step>
+  <Step title="Verify your setup">
+    Browse the wanted board to confirm you are connected:
+
+    ```bash
+    cd ~/gt
+    gt wl browse
+    ```
+
+    If a table of wanted items appears, you are connected and ready.
+  </Step>
+</Steps>
+
+<Note>
+  `gt wl leave` is not yet implemented. To switch wastelands, manually delete `mayor/wasteland.json` and the local database directory referenced by its `local_dir` value (typically `~/gt/.wasteland/<org>/<db>`).
+</Note>
+
+---
+
+## Browsing the wanted board
+
+```bash
+gt wl browse                        # All open items
+gt wl browse --project gastown      # Filter by project
+gt wl browse --type bug             # Only bugs
+gt wl browse --type docs            # Only documentation work
+gt wl browse --status claimed       # See what is claimed
+gt wl browse --priority 0           # Critical priority only
+gt wl browse --limit 10             # Limit results
+gt wl browse --json                 # JSON output for scripting
+```
+
+Browse always queries the latest upstream state, so you see current availability regardless of your local fork's state.
+
+**Wanted item fields:**
+
+| Field | Description | Values |
+|-------|-------------|--------|
+| `id` | Unique identifier | `w-<hash>` |
+| `title` | Short description | Free text |
+| `project` | Source project | `gastown`, `beads`, `hop`, etc. |
+| `type` | Kind of work | `feature`, `bug`, `design`, `rfc`, `docs` |
+| `priority` | Urgency | 0=critical, 1=high, 2=medium, 3=low, 4=backlog |
+| `effort` | Estimated size | `trivial`, `small`, `medium`, `large`, `epic` |
+| `posted_by` | Rig that created the item | Rig handle |
+| `status` | Lifecycle state | `open`, `claimed`, `in_review`, `completed`, `withdrawn` |
+
+---
+
+## Claiming work
+
+Found something you want to work on? Claim it:
+
+```bash
+cd ~/gt
+gt wl claim w-abc123
+```
+
+This sets `claimed_by` to your rig handle and changes the item status from `open` to `claimed` in your local database.
+
+<Note>
+  In Phase 1, claims write to your **local** `wl_commons` database only. Other rigs won't see your claim until the upstream commons is updated via a DoltHub PR from your fork. Two rigs can independently claim the same item — the claim is a signal of intent, not a distributed lock. The actual work (your GitHub PR) establishes priority when forks are reconciled.
+</Note>
+
+**Tips for choosing your first task:**
+
+- Start with `docs` or `small` effort items to build familiarity
+- Check `--priority 0` and `--priority 1` first — these are what the project needs most
+- Filter by `--project` if you know a specific codebase
+
+---
+
+## Submitting completions
+
+Once your work is done and you have evidence (a PR URL, commit hash, or description), submit it:
+
+```bash
+cd ~/gt
+gt wl done w-abc123 --evidence "https://github.com/org/repo/pull/99"
+```
+
+The item must be in `claimed` status and claimed by your rig. If you skipped `gt wl claim`, this command will fail.
+
+The `--evidence` flag is required. A PR URL is ideal because reviewers can inspect the work directly.
+
+On submission, Gas Town:
+1. Creates a **completion record** with a unique `c-<hash>` ID
+2. Updates the wanted item status to `in_review`
+3. Links your evidence to the completion
+
+Your completion then awaits validator review. A maintainer can issue a stamp recording their assessment across quality, reliability, and creativity dimensions.
+
+---
+
+## Posting new work
+
+See something that needs doing? Post it to the wanted board:
+
+```bash
+cd ~/gt
+gt wl post \
+  --title "Add retry logic to federation sync" \
+  --project gastown \
+  --type feature \
+  --priority 2 \
+  --effort medium \
+  --tags "go,federation" \
+  --description "Federation sync fails silently on transient network errors. Add exponential backoff with 3 retries."
+```
+
+Only `--title` is required. Everything else has sensible defaults (`priority` defaults to 2, `effort` to `medium`). Use `-d` as shorthand for `--description`.
+
+---
+
+## Syncing with upstream
+
+Pull the latest changes from the upstream commons to keep your local state current:
+
+```bash
+cd ~/gt
+gt wl sync             # Pull upstream changes
+gt wl sync --dry-run   # Preview changes without pulling
+```
+
+After syncing, the command prints a summary:
+
+```
+✓ Synced with upstream
+
+  Open wanted:       12
+  Total wanted:      47
+  Total completions: 23
+  Total stamps:      18
+```
+
+Run `gt wl sync` periodically, especially after other rigs have posted items, claimed work, or submitted completions.
+
+---
+
+## Reputation system
+
+Stamps are multi-dimensional attestations issued by validators after reviewing completed work. Each stamp records an assessment across multiple axes — quality, reliability, and creativity — along with a confidence score and severity weighting.
+
+Stamps accumulate into portable reputation that travels with your rig handle across all wastelands. The **yearbook rule** is enforced at the database level: `CHECK (NOT(author = subject))`. You cannot stamp your own work.
+
+**Trust levels (planned — not enforced in Phase 1):**
+
+| Level | Name | Planned capabilities |
+|-------|------|---------------------|
+| 0 | Registered | Browse, post |
+| 1 | Participant | Claim, submit completions |
+| 2 | Contributor | Proven work history |
+| 3 | Maintainer | Validate and stamp others' work |
+
+New rigs start at level 1 (Participant). Trust will increase as validated completions and stamps accumulate once enforcement is enabled.
+
+---
+
+## Quick reference
+
+| Command | Purpose |
+|---------|---------|
+| `gt wl join hop/wl-commons` | Join a wasteland (one-time setup) |
+| `gt wl browse` | View the wanted board |
+| `gt wl browse --type docs --priority 1` | Browse filtered results |
+| `gt wl claim <id>` | Claim a wanted item |
+| `gt wl done <id> --evidence <url>` | Submit completion evidence |
+| `gt wl post --title "..."` | Post a new wanted item |
+| `gt wl sync` | Pull upstream changes |
+| `gt wl sync --dry-run` | Preview sync without pulling |

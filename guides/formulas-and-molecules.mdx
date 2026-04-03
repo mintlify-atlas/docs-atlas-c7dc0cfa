@@ -1,0 +1,224 @@
+---
+title: "Formulas and molecules"
+description: "TOML-defined workflow templates that coordinate multi-step work, from simple sequential tasks to parallel multi-agent processes."
+---
+
+## What are formulas?
+
+Formulas are TOML-defined workflow templates embedded in the `gt` binary. They define a sequence of steps, required variables, and dependencies between steps. When a formula is instantiated, it becomes a **molecule** — an active, trackable workflow instance attached to a bead.
+
+Built-in formulas live in `internal/formula/formulas/` in the Gas Town source. You can also define custom formulas at the town or rig level.
+
+## Formula types
+
+| Type | Execution model | Use case |
+|------|----------------|----------|
+| **Workflow formula** | Sequential steps, single polecat | Standard task work (`mol-polecat-work`) |
+| **Convoy formula** | Parallel legs, multiple polecats | Coordinated multi-agent processes |
+
+Convoy formulas use `gt formula run` to dispatch work. Do **not** use `gt sling` for convoy formulas.
+
+<Warning>
+Using `gt sling` on a convoy formula will bypass the formula's parallel leg coordination and spawn a single polecat that reads the formula as a linear checklist. Always use `gt formula run` for convoy-type formulas.
+</Warning>
+
+## Formula structure
+
+Formulas are TOML files with a description, version, optional variables, and a list of steps. Steps can declare `needs` dependencies to control ordering.
+
+Here is the built-in `release` formula:
+
+```toml
+description = "Standard release process"
+formula = "release"
+version = 1
+
+[vars.version]
+description = "The semantic version to release (e.g., 1.2.0)"
+required = true
+
+[[steps]]
+id = "bump-version"
+title = "Bump version"
+description = "Run ./scripts/bump-version.sh {{version}}"
+
+[[steps]]
+id = "run-tests"
+title = "Run tests"
+description = "Run make test"
+needs = ["bump-version"]
+
+[[steps]]
+id = "build"
+title = "Build"
+description = "Run make build"
+needs = ["run-tests"]
+
+[[steps]]
+id = "create-tag"
+title = "Create release tag"
+description = "Run git tag -a v{{version}} -m 'Release v{{version}}'"
+needs = ["build"]
+
+[[steps]]
+id = "publish"
+title = "Publish"
+description = "Run ./scripts/publish.sh"
+needs = ["create-tag"]
+```
+
+Key TOML fields:
+
+| Field | Description |
+|-------|-------------|
+| `formula` | Formula identifier (used in commands) |
+| `version` | Schema version for upgrade compatibility |
+| `[vars.*]` | Required or optional input variables |
+| `[[steps]]` | Ordered step definitions |
+| `needs` | Step dependencies (must be closed before this step starts) |
+| `pour` | Set `true` to materialize steps as sub-wisps with checkpoint recovery |
+
+## How to use formulas
+
+### List available formulas
+
+```bash
+bd formula list
+bd formula show release     # Show formula details and steps
+```
+
+### Execute a formula
+
+`bd cook` instantiates a formula into a frozen protomolecule template:
+
+```bash
+bd cook release --var version=1.2.0
+```
+
+### Create a trackable molecule instance
+
+`bd mol pour` creates a persistent molecule from a protomolecule, materializing steps as sub-wisps with checkpoint recovery:
+
+```bash
+bd mol pour release --var version=1.2.0
+```
+
+Use `pour` for expensive, low-frequency workflows (like releases) where losing progress after a crash would be costly.
+
+### Run a convoy formula
+
+For formulas that coordinate multiple polecats in parallel, use `gt formula run`:
+
+```bash
+gt formula run <formula-name> --var key=value
+```
+
+## Molecule lifecycle
+
+Molecules move through four stages:
+
+```
+Formula (TOML source)
+    │
+    ▼ bd cook
+Protomolecule (frozen template)
+    │
+    ├─▶ bd mol pour ──▶ Mol / Poured Wisp (persistent, checkpoint recovery)
+    │
+    └─▶ (default) ──▶ Root Wisp (ephemeral, steps read inline)
+```
+
+| Stage | Description |
+|-------|-------------|
+| **Formula** | Source TOML — the template definition |
+| **Protomolecule** | Frozen, ready for instantiation via `bd cook` |
+| **Root Wisp** | Single wisp created at dispatch; steps are read inline from the embedded formula at `gt prime` time. Not materialized as database rows. Default mode. |
+| **Poured Wisp** | Steps materialized as sub-wisps with checkpoint recovery (`pour = true`). If a session dies, completed steps stay closed and work resumes from the last checkpoint. |
+
+### When to use pour
+
+Use `pour = true` when you would curse losing progress after a crash. The heuristic:
+
+- **High frequency + cheap steps** → inline (default, `pour = false`)
+- **Low frequency + expensive steps** → pour (`pour = true`)
+
+Poured wisps generate more database rows. The default root-only mode reduces wisp accumulation from ~6,000+ rows/day to ~400/day at scale.
+
+## How agents see formula steps
+
+Agents do not interact with molecule steps using `bd mol current` or `bd close <step-id>`. Instead, steps are rendered inline when the agent runs `gt prime`:
+
+```
+**Formula Checklist** (10 steps from mol-polecat-work):
+
+### Step 1: Load context and verify assignment
+Initialize your session and understand your assignment...
+
+### Step 2: Set up working branch
+Ensure you're on a clean feature branch...
+```
+
+The agent works through the checklist in order, then runs `gt done` (polecats) or `gt patrol report` (patrol agents) when complete.
+
+## Polecat workflow with formulas
+
+```
+1. Spawn with work on hook (via gt sling)
+2. gt prime               # Renders formula checklist inline
+3. Work through each step
+4. bd update <issue> --notes "..."   # Persist findings
+5. gt done                # Submit to merge queue, nuke sandbox, exit
+```
+
+## Patrol workflow
+
+Patrol agents (Deacon, Witness, Refinery) cycle through their own patrol formulas:
+
+```bash
+gt patrol new                          # Create root-only patrol wisp
+gt prime                               # Shows patrol checklist inline
+# Work through patrol steps
+gt patrol report --summary "..."       # Close patrol, start next cycle
+```
+
+`gt patrol report` atomically closes the current patrol root and spawns a new one for the next cycle.
+
+## Formula overlays
+
+You can customize formula steps at the town or rig level without modifying the built-in formulas. Overlays let you:
+
+- Override step descriptions for your team's conventions
+- Add pre/post steps specific to your infrastructure
+- Set default variable values
+
+Overlay files follow the same TOML structure and are merged with the built-in formula at instantiation time.
+
+## Built-in formulas
+
+Gas Town ships built-in formulas for common workflows. Browse them in the source at `internal/formula/formulas/`. The primary built-in formula for polecat work is `mol-polecat-work`, which provides the standard 10-step checklist that agents work through for task assignments.
+
+## Molecule commands reference
+
+### Beads CLI (`bd`)
+
+| Command | Description |
+|---------|-------------|
+| `bd formula list` | List all available formulas |
+| `bd formula show <name>` | Show formula details and steps |
+| `bd cook <formula>` | Instantiate formula into a protomolecule |
+| `bd mol list` | List active molecule instances |
+| `bd mol show <id>` | Show molecule details |
+| `bd mol pour <formula>` | Create a poured (persistent) molecule instance |
+| `bd mol wisp <proto>` | Create a root-only wisp |
+| `bd mol bond <proto> <parent>` | Attach molecule to an existing bead |
+
+### Gas Town CLI (`gt`)
+
+| Command | Description |
+|---------|-------------|
+| `gt formula run <name>` | Run a convoy formula (parallel dispatch) |
+| `gt prime` | Load role context and render formula checklist inline |
+| `gt mol attach <bead> <mol>` | Pin a molecule to a bead |
+| `gt mol detach <bead>` | Unpin a molecule from a bead |
+| `gt patrol new` | Create a patrol wisp and hook it |
+| `gt patrol report --summary "..."` | Close current patrol, start next cycle |

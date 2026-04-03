@@ -1,0 +1,184 @@
+---
+title: "Glossary"
+description: "Definitions for all Gas Town terminology: core principles, environments, roles, work units, and workflow commands."
+---
+
+Gas Town is a multi-agent workspace manager that coordinates multiple AI coding agents through tmux sessions using `gt` and `bd` (Beads). The terms below describe its structure and operating concepts.
+
+---
+
+## Core principles
+
+<AccordionGroup>
+  <Accordion title="MEOW — Molecular Expression of Work">
+    The practice of breaking large goals into detailed, atomic instructions for agents. MEOW is supported by Beads, Epics, Formulas, and Molecules. It ensures work is decomposed into trackable units that agents can execute autonomously without human prompting at each step.
+
+    In the README, MEOW also expands to "Mayor-Enhanced Orchestration Workflow" — the recommended pattern of telling the Mayor what to build and letting it decompose and distribute the work.
+  </Accordion>
+
+  <Accordion title="GUPP — Gas Town Universal Propulsion Principle">
+    "If there is work on your Hook, YOU MUST RUN IT."
+
+    GUPP is the behavioral contract for autonomous agents. When work appears on an agent's Hook, the agent proceeds immediately without waiting for external input. GUPP is the heartbeat of autonomous operation — it keeps work moving through the system without human intervention at each step.
+
+    `gt feed --problems` surfaces GUPP violations: agents with hooked work that have not made progress for an extended period.
+  </Accordion>
+
+  <Accordion title="NDI — Nondeterministic Idempotence">
+    The overarching design goal of Gas Town: useful outcomes through orchestration of potentially unreliable processes.
+
+    Individual operations may fail or produce varying results (nondeterministic). Gas Town guarantees eventual workflow completion through persistent Beads storage and oversight agents (Witness, Deacon) that detect failures and trigger retries or re-assignments (idempotent). The system reaches a correct final state even when intermediate steps are messy.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Environments
+
+<AccordionGroup>
+  <Accordion title="Town">
+    The management headquarters for a Gas Town workspace. Typically located at `~/gt/`. The Town coordinates all workers across multiple Rigs and houses the town-level agents — Mayor and Deacon. Town-level configuration and settings apply across every Rig unless overridden.
+  </Accordion>
+
+  <Accordion title="Rig">
+    A project-specific git repository under Gas Town management. Each Rig wraps one remote git repository and manages its own set of agents: Polecats, Refinery, Witness, and Crew members. Rigs are where actual development work happens. Added with `gt rig add <name> <url>`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Town-level roles
+
+<AccordionGroup>
+  <Accordion title="Mayor">
+    The chief-of-staff AI agent responsible for initiating Convoys, coordinating work distribution across Rigs, and notifying users of important events. The Mayor operates from the town level (`~/gt/mayor/`) and has visibility across all Rigs.
+
+    The Mayor is the recommended primary interface for Gas Town. Start with `gt mayor attach` and describe what you want to accomplish.
+  </Accordion>
+
+  <Accordion title="Deacon">
+    A daemon beacon that runs continuous Patrol cycles. The Deacon ensures worker activity across all Rigs, monitors system health, and triggers recovery when agents become unresponsive. It dispatches Dogs for maintenance tasks and escalates issues that individual Witnesses cannot resolve.
+
+    Think of the Deacon as the system's cross-rig watchdog.
+  </Accordion>
+
+  <Accordion title="Dogs">
+    The Deacon's crew of maintenance agents. Dogs handle background tasks including cleanup, health checks, and system maintenance. They are dispatched dynamically by the Deacon based on patrol findings.
+  </Accordion>
+
+  <Accordion title="Boot (the Dog)">
+    A special Dog that checks the Deacon every 5 minutes, ensuring the watchdog itself is still alive and patrolling. Boot creates a chain of accountability: Boot watches the Deacon, the Deacon watches the Witnesses, the Witnesses watch the Polecats.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Rig-level roles
+
+<AccordionGroup>
+  <Accordion title="Polecat">
+    Worker agents with persistent identity but ephemeral sessions. Each Polecat has a permanent agent bead, CV chain, and work history that accumulates across assignments. Sessions and sandboxes are ephemeral — spawned for specific tasks, cleaned up on completion — but the identity and history persist.
+
+    Polecats work in isolated git worktrees to avoid conflicts with other workers. They are assigned work via `gt sling` and submit completed work to the merge queue via `gt done`.
+  </Accordion>
+
+  <Accordion title="Refinery">
+    The per-rig merge queue processor. When Polecats complete work via `gt done`, the Refinery batches merge requests, runs verification gates (typecheck, lint, test, build), and merges approved work to the main branch using a Bors-style bisecting queue. Failed merge requests are isolated and either fixed inline or re-dispatched.
+
+    Polecats never push directly to the main branch — everything goes through the Refinery.
+  </Accordion>
+
+  <Accordion title="Witness">
+    A patrol agent that oversees Polecats and the Refinery within a Rig. The Witness monitors progress, detects stuck agents, triggers recovery actions (nudge or handoff), manages session cleanup, and tracks completion. Witnesses delegate work rather than implementing it directly.
+  </Accordion>
+
+  <Accordion title="Crew">
+    Long-lived, named agents for persistent human collaboration within a Rig. Unlike ephemeral Polecats, Crew members maintain context across sessions and are ideal for ongoing work relationships. Created with `gt crew add <name> --rig <rig>`. Each Crew member has their own worktree in `~/gt/<rig>/crew/<name>/rig/`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Work units
+
+<AccordionGroup>
+  <Accordion title="Bead">
+    A git-backed atomic work unit stored in Dolt. Beads are the fundamental unit of work tracking in Gas Town. They can represent issues, tasks, epics, or any trackable work item. Bead IDs use a prefix and 5-character alphanumeric format (e.g., `gt-abc12`, `hq-x7k2m`). The prefix indicates the rig or origin.
+
+    The terms "bead" and "issue" are used interchangeably — beads are the underlying data format, issues are the work items stored as beads.
+  </Accordion>
+
+  <Accordion title="Formula">
+    A TOML-based workflow source template. Formulas define reusable patterns for common operations like patrol cycles, code review, or deployment sequences. They are instantiated as Molecules for tracking. Two formula types exist: `workflow` (sequential steps, single Polecat) and `convoy` (parallel legs, multiple Polecats).
+
+    List available formulas: `bd formula list`
+  </Accordion>
+
+  <Accordion title="Protomolecule">
+    A template class for instantiating Molecules. Protomolecules define the structure and steps of a workflow without being tied to specific work items. Cooking a Formula produces a Protomolecule: `bd cook <formula>`.
+  </Accordion>
+
+  <Accordion title="Molecule">
+    A durable, chained Bead workflow. Molecules represent multi-step processes where each step is tracked as a Bead. They survive agent restarts and ensure complex workflows complete even when individual operations fail. Pour a Protomolecule to create a tracked Molecule: `bd mol pour <formula>`.
+  </Accordion>
+
+  <Accordion title="Wisp">
+    An ephemeral Bead destroyed after it runs. Wisps are lightweight work items used for transient operations that do not need permanent tracking. Deacon, Witness, and Refinery all use wisps for their continuous patrol loops.
+
+    Create a wisp: `gt patrol new`
+  </Accordion>
+
+  <Accordion title="Hook">
+    A special pinned Bead for each agent that serves as its primary work queue. When work appears on an agent's Hook, GUPP dictates the agent must run it. Hooks are git worktree-based persistent storage — work assigned to an agent via `gt sling` lands on their Hook and survives crashes and restarts.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Workflow commands
+
+<AccordionGroup>
+  <Accordion title="Convoy">
+    The primary work-order unit that wraps related Beads. Convoys group related tasks together, can be assigned to multiple workers, and provide a unified dashboard view of progress. Created with `gt convoy create "name" [issue-ids...]`.
+
+    Convoys labeled `mountain` get autonomous stall detection and smart skip logic for epic-scale execution.
+  </Accordion>
+
+  <Accordion title="Slinging">
+    Assigning work to an agent via `gt sling`. When you sling a Bead to a Polecat or Crew member, it lands on their Hook for execution. The agent receives a GUPP-triggering work assignment.
+
+    ```bash
+    gt sling gt-abc12 myproject
+    gt sling gt-abc12 myproject --agent codex
+    ```
+  </Accordion>
+
+  <Accordion title="Nudging">
+    Real-time messaging between agents via `gt nudge`. Nudges deliver a message directly to another agent's active tmux session. Unlike mail, nudges are not persistent — they are delivered immediately or not at all.
+
+    `gt nudge` is the only correct way to send text to another agent session. Raw `tmux send-keys` does not handle input correctly.
+  </Accordion>
+
+  <Accordion title="Handoff">
+    An agent session refresh via `gt handoff`. When an agent's context fills up or a fresh start is needed, handoff transfers the current work state to a new session via mail. The outgoing session records a summary, a new session starts, and the new session reads the handoff mail to resume from where the previous session left off.
+  </Accordion>
+
+  <Accordion title="Seance">
+    Communicating with previous agent sessions via `gt seance`. Seance discovers prior sessions through `.events.jsonl` logs and lets agents query their predecessors for context, decisions, and findings from earlier work — without re-reading entire codebases.
+
+    ```bash
+    gt seance                        # List discoverable predecessor sessions
+    gt seance --talk <id> -p "What did you find about the auth bug?"
+    ```
+  </Accordion>
+
+  <Accordion title="Patrol">
+    The ephemeral loop that maintains the system heartbeat for Deacon, Witness, and Refinery agents. Each patrol cycle creates a root-only wisp, works through a checklist (agent health, merge queue state, stuck workers), and closes with a summary before immediately starting the next cycle.
+
+    ```bash
+    gt patrol new             # Create root-only wisp
+    gt prime                  # Shows patrol checklist inline
+    gt patrol report --summary "..."  # Close + start next cycle
+    ```
+  </Accordion>
+</AccordionGroup>

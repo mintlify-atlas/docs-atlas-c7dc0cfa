@@ -1,0 +1,223 @@
+---
+title: "Docker"
+description: "Running Gas Town with Docker Compose — quickstart, environment variables, volume mounts, and post-container setup."
+---
+
+Docker Compose is the fastest way to get Gas Town running in an isolated environment, with no dependency installation required on the host. The container includes Gas Town, Dolt, and all required tooling pre-installed.
+
+## When to use Docker vs native install
+
+<Columns cols={2}>
+  <Card title="Docker Compose" icon="docker">
+    - You want a clean sandbox without affecting your host environment
+    - You are evaluating Gas Town for the first time
+    - You need reproducible agent execution across machines
+    - You are on a system where native Go build is inconvenient
+  </Card>
+  <Card title="Native install" icon="terminal">
+    - You need direct tmux integration with your existing terminal sessions
+    - You want to modify Gas Town source and test changes quickly
+    - You are running Gas Town in production at scale
+    - You need access to host system resources from agents
+  </Card>
+</Columns>
+
+---
+
+## Docker Compose quickstart
+
+<Steps>
+  <Step title="Set required environment variables">
+    Export the variables Gas Town uses to configure the container. Add them to your shell or a `.env` file:
+
+    ```bash
+    export GIT_USER="Your Name"
+    export GIT_EMAIL="you@example.com"
+    export FOLDER="/Users/you/code"
+    export DASHBOARD_PORT=8080   # optional — defaults to 8080
+    ```
+
+    | Variable | Required | Description |
+    |----------|----------|-------------|
+    | `GIT_USER` | Yes | Git author name for commits made inside the container |
+    | `GIT_EMAIL` | Yes | Git author email for commits |
+    | `FOLDER` | Yes | Host directory mounted as `/gt` inside the container |
+    | `DASHBOARD_PORT` | No | Host port for the web dashboard (default: `8080`) |
+  </Step>
+  <Step title="Build the image">
+    Build the Gas Town Docker image. Only required on first run or after code changes:
+
+    ```bash
+    docker compose build
+    ```
+  </Step>
+  <Step title="Start the container">
+    Start the container in the background:
+
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+  <Step title="Exec into the container">
+    Open a shell inside the running container:
+
+    ```bash
+    docker compose exec gastown zsh
+    ```
+
+    You will land in the container with Gas Town available as `gt`.
+  </Step>
+  <Step title="Initialize your Gas Town workspace">
+    Inside the container, run the Gas Town setup sequence:
+
+    ```bash
+    gt up
+    ```
+
+    This initializes the workspace at `/gt` (your mapped `FOLDER`).
+  </Step>
+  <Step title="Authenticate GitHub (optional)">
+    If you want `gh` CLI to work for creating PRs and interacting with GitHub:
+
+    ```bash
+    gh auth login
+    ```
+  </Step>
+  <Step title="Attach to the Mayor">
+    Start your main AI coordinator session:
+
+    ```bash
+    gt mayor attach
+    ```
+
+    Tell the Mayor what you want to build.
+  </Step>
+</Steps>
+
+---
+
+## Volume mounts and storage
+
+The `docker-compose.yml` configures three volumes:
+
+```yaml
+volumes:
+  - agent-home:/home/agent       # Agent home directory (named volume)
+  - ${FOLDER}:/gt                # Your host directory, mounted at /gt
+  - dolt-data:/gt/.dolt-data     # Dolt database on ext4 volume
+```
+
+| Mount | Type | Purpose |
+|-------|------|---------|
+| `agent-home:/home/agent` | Named volume | Agent home directory and configuration, persists across restarts |
+| `${FOLDER}:/gt` | Bind mount | Your host `FOLDER` is the Gas Town workspace inside the container |
+| `dolt-data:/gt/.dolt-data` | Named volume | Dolt database files on a proper ext4 volume |
+
+<Note>
+  The Dolt database is kept on a separate named volume (`dolt-data`) rather than the bind-mounted `FOLDER`. This avoids journal corruption from VirtioFS fsync semantics on macOS. Do not move or delete this volume while Dolt databases are in use.
+</Note>
+
+### What FOLDER maps to
+
+The `FOLDER` variable maps your host directory to `/gt` inside the container. This means:
+
+- **Your host code** at `FOLDER/myproject` appears as `/gt/myproject` in the container
+- **Gas Town workspace files** written by `gt` commands persist back to your host
+- **Git repositories** cloned inside `/gt` are accessible from your host at `FOLDER`
+
+<Tip>
+  Point `FOLDER` at a directory that already contains your code repositories, or use an empty directory for a clean start. Everything Gas Town creates under `/gt` will be readable from your host machine.
+</Tip>
+
+---
+
+## Dashboard port configuration
+
+The container exposes port 8080 from the Gas Town web dashboard. The host port is configurable via `DASHBOARD_PORT`:
+
+```bash
+export DASHBOARD_PORT=3000
+docker compose up -d
+```
+
+The dashboard is then accessible at `http://localhost:3000`. Inside the container, Gas Town always serves on port 8080 — only the host mapping changes.
+
+Start the dashboard from inside the container:
+
+```bash
+gt dashboard           # Serves on port 8080 (mapped to DASHBOARD_PORT on host)
+gt dashboard --open    # Open in browser automatically
+```
+
+---
+
+## Service configuration
+
+The full `docker-compose.yml` for reference:
+
+```yaml
+services:
+  gastown:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gastown-sandbox
+    stdin_open: false
+    tty: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+      - NET_RAW
+    environment:
+      IS_SANDBOX: 1
+      GIT_USER: ${GIT_USER:-TestUser}
+      GIT_EMAIL: ${GIT_EMAIL:-test@example.com}
+    volumes:
+      - agent-home:/home/agent
+      - ${FOLDER}:/gt
+      - dolt-data:/gt/.dolt-data
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8080"
+    command: sleep infinity
+
+volumes:
+  agent-home:
+  dolt-data:
+```
+
+The container runs as a sandboxed environment with `no-new-privileges` and a minimal capability set. The `IS_SANDBOX=1` environment variable is set automatically, which Gas Town uses to apply sandbox-appropriate defaults.
+
+---
+
+## Common operations
+
+```bash
+# Start the container (after first build)
+docker compose up -d
+
+# Open a shell
+docker compose exec gastown zsh
+
+# Stop the container
+docker compose down
+
+# Rebuild after code changes
+docker compose build && docker compose up -d
+
+# View container logs
+docker compose logs -f gastown
+
+# Remove all volumes (destructive — deletes Dolt data and agent-home)
+docker compose down -v
+```
+
+<Warning>
+  `docker compose down -v` removes named volumes including `dolt-data` and `agent-home`. This deletes all Dolt database content and agent configuration stored in those volumes. Run it only if you want a fully clean slate.
+</Warning>

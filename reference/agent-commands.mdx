@@ -1,0 +1,465 @@
+---
+title: "Agent commands"
+description: "Reference for spawning, attaching to, and communicating with Gas Town agents."
+---
+
+## Mayor
+
+The Mayor is your primary AI coordinator — a Claude Code (or other agent) instance with full context about your workspace and projects. Start here for complex, multi-issue work.
+
+### `gt mayor attach`
+
+Attaches to the Mayor's tmux session. Creates the session if it does not exist.
+
+```bash
+gt mayor attach
+gt mayor attach --agent auggie
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime for this launch |
+
+---
+
+### `gt mayor start`
+
+Starts the Mayor session without attaching to it.
+
+```bash
+gt mayor start
+gt mayor start --agent gemini
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime for this launch |
+
+---
+
+### `gt mayor detach`
+
+Detaches from the Mayor's session (leaves it running in the background).
+
+```bash
+gt mayor detach
+```
+
+---
+
+### `gt mayor restart`
+
+Restarts the Mayor session.
+
+```bash
+gt mayor restart
+gt mayor restart --agent opencode
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime for this restart |
+
+---
+
+## Work assignment
+
+### `gt sling`
+
+The unified work dispatch command. Assigns a bead (work item) to an agent, auto-spawning a polecat if needed. Automatically creates a convoy for dashboard visibility unless `--no-convoy` is specified.
+
+```bash
+gt sling <bead-or-formula> [target]
+```
+
+**Target resolution:**
+
+| Target | Result |
+|--------|--------|
+| *(none)* | Current agent (self) |
+| `<rig>` | Auto-spawn polecat in that rig |
+| `<rig>/<name>` | Specific polecat (e.g., `myproject/Toast`) |
+| `mayor` | The Mayor |
+| `crew` | Crew worker in current rig |
+| `deacon/dogs` | Auto-dispatch to idle dog |
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <name>` | Override agent runtime for this sling/spawn |
+| `--on <bead-id>` | Apply formula to an existing bead (formula sling) |
+| `--var <key>=<value>` | Formula variable, repeatable |
+| `-a`, `--args <text>` | Natural-language instructions for the executor |
+| `--stdin` | Read `--message` and/or `--args` from stdin (avoids shell quoting issues) |
+| `-s`, `--subject <text>` | Context subject for the work |
+| `-m`, `--message <text>` | Context message for the work |
+| `--merge <strategy>` | Merge strategy: `mr` (default), `direct` (push to main), `local` (keep on branch) |
+| `--no-convoy` | Skip auto-convoy creation |
+| `--owned` | Mark auto-convoy as caller-managed lifecycle |
+| `--crew <name>` | Target a named crew member in the specified rig |
+| `--create` | Create polecat if it doesn't exist |
+| `--force` | Force spawn even if polecat has unread mail |
+| `--account <handle>` | Claude Code account handle to use |
+| `--base-branch <name>` | Override base branch for polecat worktree |
+| `--review-only` | Mark work as review-only: assignee evaluates and reports back, must not merge/commit/push |
+| `--formula <name>` | Formula to apply (default: `mol-polecat-work` for polecat targets) |
+| `--no-merge` | Skip merge queue on completion (keep work on feature branch) |
+| `--max-concurrent <n>` | Limit concurrent polecat spawns in batch mode |
+| `-n`, `--dry-run` | Show what would be done without doing it |
+
+```bash
+# Assign a bead to a rig (auto-spawns polecat)
+gt sling gt-abc12 myproject
+
+# Override the agent runtime for this worker
+gt sling gt-abc12 myproject --agent codex
+
+# Sling to a specific polecat
+gt sling gt-abc12 myproject/Toast
+
+# Sling to a crew member
+gt sling gt-abc12 myproject --crew alice
+
+# Use a workflow formula template
+gt sling shiny-enterprise --on gt-abc123 gastown
+
+# With natural-language args
+gt sling gt-abc12 myproject --args "focus on the auth module, patch release"
+
+# Multi-line args via stdin
+gt sling gt-abc12 myproject --stdin <<'EOF'
+Focus on:
+1. SQL injection in query builders
+2. XSS in template rendering
+EOF
+
+# Skip auto-convoy
+gt sling gt-abc12 myproject --no-convoy
+
+# Review only (no commits allowed)
+gt sling gt-abc12 myproject --review-only
+```
+
+<Warning>
+Use `gt sling` only for **workflow** formulas (sequential steps, single polecat). For **convoy** formulas (parallel legs), use `gt formula run` instead. Using `gt sling` on a convoy formula will fail with "convoy type not supported".
+</Warning>
+
+---
+
+### `gt unsling`
+
+Removes work from an agent's hook (the inverse of `gt sling`). The bead's status changes from `hooked` back to `open`.
+
+```bash
+gt unsling
+gt unsling <bead-id>
+gt unsling <target>
+gt unsling <bead-id> <target>
+```
+
+```bash
+# Clear your own hook (whatever's there)
+gt unsling
+
+# Only unsling if a specific bead is hooked
+gt unsling gt-abc12
+
+# Clear another agent's hook
+gt unsling myproject/polecats/alpha
+
+# Unsling a specific bead from another agent
+gt unsling gt-abc12 myproject/polecats/alpha
+```
+
+---
+
+### `gt hook`
+
+Shows or attaches work on a hook. With no arguments, shows your current hook status. With a bead ID, attaches that work to your hook.
+
+```bash
+gt hook
+gt hook <bead-id>
+gt hook <bead-id> <target>
+```
+
+```bash
+# Show what's on your hook
+gt hook
+
+# Attach a bead to your hook
+gt hook gt-abc12
+
+# Attach a bead with a subject
+gt hook gt-abc12 -s "Fix the auth bug"
+
+# Attach to another agent's hook
+gt hook gt-abc12 myproject/crew/max
+```
+
+<Note>
+`gt hook` attaches work without immediately starting a session (`gt sling` does both). Use `gt hook` when you want to queue work for an agent that's already running.
+</Note>
+
+---
+
+### `gt start`
+
+Starts a new agent session. Used for general agent spawning.
+
+```bash
+gt start
+gt start --agent <alias>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime for this launch |
+
+```bash
+gt start --agent cursor
+```
+
+---
+
+## Crew operations
+
+### `gt crew start`
+
+Starts a crew member session by name.
+
+```bash
+gt crew start <name>
+gt crew start <name> --agent <alias>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime for this session |
+
+---
+
+### `gt crew at`
+
+Attaches to a crew member's session.
+
+```bash
+gt crew at <name>
+gt crew at <name> --agent <alias>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--agent <alias>` | Override the agent runtime |
+
+---
+
+## Agent listing and status
+
+### `gt agents`
+
+Lists all active agents across all rigs, grouped by rig and role.
+
+```bash
+gt agents
+```
+
+---
+
+### `gt prime`
+
+Reloads full role context for the current agent session. Run this inside a session after context compaction, a clear, or a new session start. Injects role identity, pending work, and patrol context via the `SessionStart` hook.
+
+```bash
+gt prime
+```
+
+<Tip>
+Always run `gt prime` after a context compaction or when starting a fresh session. It's the primary mechanism for restoring agent identity and context.
+</Tip>
+
+---
+
+## Communication
+
+### `gt nudge`
+
+Sends a message directly to another agent's active session. This is the only correct way to deliver text to a running agent — never use raw `tmux send-keys`.
+
+```bash
+gt nudge <target> "<message>"
+```
+
+**Target formats:**
+
+| Format | Example |
+|--------|---------|
+| Role shortcut | `mayor`, `deacon`, `witness`, `refinery` |
+| Full path | `myproject/crew/alice`, `myproject/polecats/toast` |
+
+```bash
+gt nudge mayor "Status update: PR review complete"
+gt nudge myproject/crew/dom "Check your mail — PR ready for review"
+gt nudge witness "Polecat health check needed"
+```
+
+<Warning>
+`gt nudge` uses literal mode, debounce, and a separate Enter keystroke for reliable delivery. Never use raw `tmux send-keys` — it does not handle Claude's input correctly.
+</Warning>
+
+---
+
+### `gt handoff`
+
+Requests a session cycle. The agent saves its context state, sends mail to itself, and signals the manager to kill the current session and start a fresh one. Used when an agent's context is filling up.
+
+```bash
+gt handoff
+gt handoff --shutdown    # Terminate (used by polecats completing work)
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--shutdown` | Terminate the session rather than cycling it (polecat shutdown path) |
+
+**Session cycling sequence:**
+
+1. Agent notices context filling
+2. Agent runs `gt handoff` (sends mail to itself)
+3. Manager kills current session
+4. Manager starts new session
+5. New session reads handoff mail and resumes work
+
+---
+
+### `gt peek`
+
+Checks the health of a running agent session.
+
+```bash
+gt peek <agent>
+```
+
+```bash
+gt peek witness
+gt peek myproject/polecats/alpha
+```
+
+---
+
+## Session management
+
+### `gt session stop`
+
+Stops a specific agent session.
+
+```bash
+gt session stop <rig>/<agent>
+```
+
+```bash
+gt session stop myproject/witness
+gt session stop myproject/polecats/alpha
+```
+
+---
+
+## Session discovery (Seance)
+
+### `gt seance`
+
+Lists discoverable predecessor sessions. Seance discovers previous agent sessions via `.events.jsonl` logs, enabling agents to recover context and decisions from earlier work without re-reading entire codebases.
+
+```bash
+gt seance
+```
+
+**Session discovery format:**
+
+```
+[GAS TOWN] recipient <- sender • timestamp • topic[:mol-id]
+```
+
+Example:
+```
+[GAS TOWN] gastown/crew/gus <- human • 2025-12-30T15:42 • restart
+```
+
+---
+
+### `gt seance --talk`
+
+Opens a conversation with a predecessor session. Pass `-p` for a one-shot question without entering interactive mode.
+
+```bash
+gt seance --talk <id>
+gt seance --talk <id> -p "Question?"
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--talk <id>` | Session ID to talk to |
+| `-p "<question>"` | One-shot question (non-interactive) |
+
+```bash
+gt seance --talk abc123
+gt seance --talk abc123 -p "What did you find in the auth module?"
+```
+
+---
+
+## Built-in agent presets
+
+The following agent aliases are built into Gas Town and available in every workspace:
+
+| Alias | Description |
+|-------|-------------|
+| `claude` | Claude Code (default runtime) |
+| `gemini` | Gemini CLI |
+| `codex` | OpenAI Codex CLI |
+| `cursor` | Cursor |
+| `auggie` | Augment Code |
+| `amp` | Amp |
+| `opencode` | OpenCode |
+| `copilot` | GitHub Copilot CLI |
+| `pi` | Pi |
+| `omp` | OpenManus Pro |
+
+<Note>
+**GitHub Copilot** uses executable lifecycle hooks in `.github/hooks/gastown.json` with the same events as Claude Code (`sessionStart`, `userPromptSubmitted`, `preToolUse`, `sessionEnd`). It uses a 5-second ready delay instead of prompt-based detection. Requires a Copilot seat and org-level CLI policy enabled.
+</Note>
+
+### Agent override
+
+You can override the agent runtime per-command without changing the configured default:
+
+```bash
+# Override for Mayor/Deacon launch
+gt start --agent codex-low
+gt mayor start --agent auggie
+gt mayor attach --agent auggie
+
+# Override for crew session
+gt crew start alice --agent cursor
+gt crew at alice --agent cursor
+
+# Override for polecat spawn
+gt sling gt-abc12 myproject --agent claude-haiku
+```

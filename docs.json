@@ -1,122 +1,100 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Gas Town",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#73dff6",
+    "light": "#37454c",
+    "dark": "#cfbdb2"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/ecb3272f-1a87-40bc-b8fc-1e6cf10e2c81.svg",
+  "logo": {
+    "light": "https://media.brand.dev/91941054-d031-453e-bc6f-36d5c31e5c21.svg",
+    "dark": "https://media.brand.dev/91941054-d031-453e-bc6f-36d5c31e5c21.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/gastownhall/gastown"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/gastownhall/gastown"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/architecture",
+              "concepts/agents-and-roles",
+              "concepts/work-tracking",
+              "concepts/hooks-and-persistence"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Workflows",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/mayor-workflow",
+              "guides/convoy-workflow",
+              "guides/formulas-and-molecules",
+              "guides/monitoring-and-health"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Advanced",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/agent-integration",
+              "guides/wasteland-federation",
+              "guides/telemetry",
+              "guides/docker"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Command Reference",
             "pages": [
-              "api-reference/introduction"
+              "reference/workspace-commands",
+              "reference/agent-commands",
+              "reference/convoy-commands",
+              "reference/merge-queue-commands",
+              "reference/monitoring-commands"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Configuration",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "reference/configuration",
+              "reference/environment-variables",
+              "reference/agent-presets"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "reference/troubleshooting",
+              "reference/glossary"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

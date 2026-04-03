@@ -1,0 +1,197 @@
+---
+title: "Hooks and persistence"
+description: "How Gas Town uses git-backed hooks to persist agent work across crashes, restarts, and context resets."
+---
+
+The core problem Gas Town solves is **agent amnesia**: AI coding agents lose context when they restart. Gas Town prevents this by storing work state in **Hooks** — git-backed structures that survive crashes, session cycling, and context resets. When an agent restarts, it finds its hook, reads its current assignment, and continues where it left off.
+
+## What is a Hook?
+
+A Hook is a special pinned bead that represents an agent's current work assignment. Every active agent in Gas Town has one. When you sling work to an agent with `gt sling`, the bead is "hooked" to that agent — placed on its Hook.
+
+The Hook is how the system communicates assignments. An agent that starts a session checks its Hook first:
+
+```bash
+gt hook          # What is on my hook right now?
+gt prime         # Full context reload, including hook contents
+```
+
+If the Hook has work, the agent executes immediately. This is the [Propulsion Principle](#the-propulsion-principle).
+
+Hooks are implemented as **git worktrees** at the agent's working directory. The worktree is tied to a branch in the rig's canonical repository (`mayor/rig`). Because the hook state is a git commit, it survives any process crash or restart.
+
+## The Propulsion Principle (GUPP)
+
+> **"If there is work on your Hook, YOU MUST RUN IT."**
+
+GUPP — the Gas Town Universal Propulsion Principle — is the behavioral contract all agents follow. It is not a guideline; it is the mechanism that keeps the system running.
+
+Gas Town is a steam engine. Agents are pistons. Every moment an agent waits after finding work on its Hook is a moment the engine stalls. Other agents may be blocked waiting on that agent's output.
+
+**Agent startup sequence:**
+
+1. Check hook (`gt hook`)
+2. Work found → execute immediately, no announcement, no confirmation
+3. Hook empty → check mail for attached work
+4. Nothing found → escalate to Witness
+
+<Warning>
+The failure mode GUPP prevents: agent restarts, announces itself, waits for confirmation, Witness assumes work is progressing, nothing happens, Gas Town stalls. Check your Hook. Execute.
+</Warning>
+
+### The propulsion loop
+
+Formula steps provide clear waypoints so agents never need to ask what to do next:
+
+```bash
+gt hook                    # 1. What is hooked?
+gt prime                   # 2. See inline checklist for current assignment
+# Work through each step
+bd close gt-abc12.3 --continue  # 3. Close step and auto-advance
+# Repeat until all steps done
+gt done                    # 4. Submit work and go idle (polecats)
+gt patrol report           # 4. Close + start next cycle (patrol agents)
+```
+
+`bd close --continue` advances the molecule automatically. One command, no momentum loss.
+
+## Hook lifecycle
+
+A Hook moves through these states as an agent is spawned, works, and completes:
+
+```
+[*] → Created → Active → Suspended → Completed → Archived → [*]
+```
+
+| State | Meaning |
+|-------|---------|
+| **Created** | Agent spawned; hook initialized but no assignment yet |
+| **Active** | Work assigned via `gt sling`; agent executing |
+| **Suspended** | Agent session paused; hook preserved, work not lost |
+| **Completed** | Agent ran `gt done`; hook cleared, polecat goes idle |
+| **Archived** | Hook data retained for history; agent no longer active |
+
+An agent can move from **Suspended** back to **Active** — this is session cycling, not failure. The sandbox (worktree) persists through every cycle.
+
+## How worktrees persist work
+
+The git worktree is the physical manifestation of the Hook. It holds:
+
+- Uncommitted changes
+- Staged changes
+- The current branch and all commits on it
+- The molecule state for the current assignment
+
+All of this survives a session end. When a new session starts, `gt prime` reads the hook and the worktree, and the agent picks up exactly where the previous session stopped.
+
+### Polecats: worktrees
+
+Polecats work in git worktrees branched from the rig's canonical clone:
+
+```
+~/gt/gastown/mayor/rig/           ← canonical clone
+~/gt/gastown/polecats/Toast/rig/  ← polecat worktree
+```
+
+The polecat's worktree is created once and reused across all assignments. When a new assignment arrives, `gt sling` resets the worktree to a fresh branch from `main` — a branch operation, not a new worktree:
+
+```bash
+# On first sling: create the worktree
+git worktree add -b polecat/Toast-<timestamp> polecats/Toast/rig
+
+# On reuse (idle polecat gets new work):
+git checkout main
+git pull origin main
+git checkout -b polecat/Toast/<new-issue>@<timestamp>
+```
+
+This avoids the ~5 second overhead of `git worktree add` on every assignment.
+
+### Crew: full clones
+
+Crew workspaces are full git clones, not worktrees. Human developers need independent repos with full remote management. Crew workspaces are created once and persist indefinitely:
+
+```bash
+gt crew add yourname --rig myproject
+# Creates ~/gt/myproject/crew/yourname/ as a full clone
+```
+
+| Workspace | Type | Rationale |
+|-----------|------|-----------|
+| Polecats | Git worktree | Fast spawn, shared object store, ephemeral sessions |
+| Refinery | Git worktree | Merge queue needs same repo, shared commit history |
+| Crew | Full clone | Independent remotes, human-managed lifecycle |
+
+## Beads redirect mechanism
+
+Worktrees do not have their own beads databases. They use a `.beads/redirect` file that points to the canonical database at `mayor/rig/.beads`:
+
+```
+polecats/Toast/rig/.beads/redirect → ../../../mayor/rig/.beads
+refinery/rig/.beads/redirect       → ../../mayor/rig/.beads
+```
+
+This means all `bd` commands from inside a worktree transparently read and write to the rig's single shared database. There is no synchronization problem — there is only one database per rig, accessed by all agents through the Dolt SQL server.
+
+The resolver follows up to 3 levels of redirect chains with circular detection, so nested worktrees also work correctly.
+
+## Data plane lifecycle
+
+All beads data flows through a six-stage lifecycle. The lifecycle ensures the database stays compact and performant as thousands of beads accumulate over time:
+
+| Stage | Name | What happens | Automated |
+|-------|------|--------------|-----------|
+| 1 | **CREATE** | Bead written with a `DOLT_COMMIT` | Yes |
+| 2 | **LIVE** | Active work; bead updated as work progresses | Yes |
+| 3 | **CLOSE** | Work complete; bead marked done | Yes |
+| 4 | **DECAY** | Closed beads deleted after 7–30 days | By Dog (Reaper) |
+| 5 | **COMPACT** | Dolt commit history rebased together | By Dog (Compactor) |
+| 6 | **FLATTEN** | All history squashed to a single commit | By Dog (Doctor gc) |
+
+```
+CREATE → LIVE → CLOSE → DECAY → COMPACT → FLATTEN
+```
+
+Dogs (dispatched by the Deacon) automate stages 4–6. You do not need to manage this manually.
+
+## Why persistence matters
+
+Without persistence, agent crashes mean lost work. With Gas Town hooks:
+
+| Without Gas Town | With Gas Town hooks |
+|-----------------|---------------------|
+| Agent crashes — work lost | Hook survives crash; next session continues |
+| Context window full — restart from scratch | Sandbox and molecule state persist; `gt prime` restores context |
+| 10 agents are hard to coordinate | Up to 30 agents share a single beads database via Dolt |
+| No audit trail | Every bead update is a git commit with attribution |
+| Hard to recover from partial failures | NDI guarantees eventual completion via Witness/Deacon oversight |
+
+### Agent crash recovery
+
+When a polecat session crashes unexpectedly:
+
+1. The Witness detects the stall (session stopped, hook still set)
+2. The Witness respawns the session in the **existing sandbox**
+3. The new session runs `gt prime`, finds the hook, and continues
+
+No work is lost. The only cost is the time the Witness takes to detect and respond to the stall.
+
+```bash
+# Manual recovery if needed
+gt hooks list       # Show all managed settings.json locations and sync status
+gt hooks sync       # Regenerate all agent hook/settings files
+```
+
+### Context compaction recovery
+
+When an AI agent's context window fills and the session is forcibly compacted:
+
+1. A new session starts in the same worktree
+2. `gt prime` injects full role context, hook contents, and formula checklist
+3. The agent continues from the last completed step
+
+The polecat's identity, sandbox, and bead state are all intact. Context compaction is normal operation, not a failure.
+
+<Tip>
+Agents can also query previous sessions directly using `gt seance`, which discovers predecessor session logs and lets you ask them questions about earlier decisions and context.
+</Tip>

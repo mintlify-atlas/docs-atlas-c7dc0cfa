@@ -1,0 +1,129 @@
+---
+title: "Environment variables"
+description: "All environment variables set by Gas Town for agent sessions, organized by scope and role."
+---
+
+Gas Town sets environment variables for each agent session via `config.AgentEnv()`. Variables are injected into the tmux session environment when agents are spawned. Agents read these to understand their identity, role, and working context.
+
+---
+
+## Core variables
+
+Set for every agent session regardless of role.
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `GT_ROLE` | Agent role type | `mayor`, `witness`, `polecat`, `crew` |
+| `GT_ROOT` | Town root directory | `/home/user/gt` |
+| `BD_ACTOR` | Agent identity used for bead attribution | `gastown/polecats/toast` |
+| `GIT_AUTHOR_NAME` | Git commit identity (same value as `BD_ACTOR`) | `gastown/polecats/toast` |
+| `BEADS_DIR` | Beads database location | `/home/user/gt/gastown/.beads` |
+
+---
+
+## Rig-level variables
+
+Set for agents that belong to a specific rig.
+
+| Variable | Purpose | Roles |
+|----------|---------|-------|
+| `GT_RIG` | Rig name | `witness`, `refinery`, `polecat`, `crew` |
+| `GT_POLECAT` | Polecat worker name | `polecat` only |
+| `GT_CREW` | Crew worker name | `crew` only |
+| `BEADS_AGENT_NAME` | Agent name for beads operations | `polecat`, `crew` |
+
+---
+
+## Other variables
+
+| Variable | Purpose |
+|----------|---------|
+| `GIT_AUTHOR_EMAIL` | Workspace owner email, sourced from `git config user.email` |
+| `GT_TOWN_ROOT` | Override town root detection. Set manually when the default detection does not resolve correctly. |
+| `CLAUDE_RUNTIME_CONFIG_DIR` | Custom Claude settings directory path |
+
+---
+
+## Environment by role
+
+| Role | Key variables |
+|------|---------------|
+| **Mayor** | `GT_ROLE=mayor`, `BD_ACTOR=mayor` |
+| **Deacon** | `GT_ROLE=deacon`, `BD_ACTOR=deacon` |
+| **Boot** | `GT_ROLE=deacon/boot`, `BD_ACTOR=deacon-boot` |
+| **Witness** | `GT_ROLE=witness`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/witness` |
+| **Refinery** | `GT_ROLE=refinery`, `GT_RIG=<rig>`, `BD_ACTOR=<rig>/refinery` |
+| **Polecat** | `GT_ROLE=polecat`, `GT_RIG=<rig>`, `GT_POLECAT=<name>`, `BD_ACTOR=<rig>/polecats/<name>` |
+| **Crew** | `GT_ROLE=crew`, `GT_RIG=<rig>`, `GT_CREW=<name>`, `BD_ACTOR=<rig>/crew/<name>` |
+
+---
+
+## OpenTelemetry variables
+
+Configure OTLP endpoints for emitting structured logs and metrics. Both variables are optional; omitting them disables telemetry export.
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `GT_OTEL_LOGS_URL` | OTLP HTTP endpoint for structured logs | `http://localhost:9428/insert/jsonline` |
+| `GT_OTEL_METRICS_URL` | OTLP HTTP endpoint for metrics | `http://localhost:8428/api/v1/write` |
+
+```bash
+export GT_OTEL_LOGS_URL="http://localhost:9428/insert/jsonline"
+export GT_OTEL_METRICS_URL="http://localhost:8428/api/v1/write"
+```
+
+---
+
+## DoltHub / Wasteland variables
+
+Used for Wasteland federation. See the Wasteland guide for full setup.
+
+| Variable | Purpose |
+|----------|---------|
+| `DOLTHUB_ORG` | Your DoltHub organization name |
+| `DOLTHUB_TOKEN` | DoltHub API token for authenticated operations |
+
+---
+
+## OpenCode variable
+
+Required for OpenCode to run in autonomous (unattended) mode as a polecat or patrol agent.
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `OPENCODE_PERMISSION` | `'{"*":"allow"}'` | Grants OpenCode permission to execute all tool calls without confirmation |
+
+Add to your shell profile:
+
+```bash
+export OPENCODE_PERMISSION='{"*":"allow"}'
+```
+
+---
+
+## How variables are set
+
+Variables are injected into the tmux session environment at agent spawn time via `config.AgentEnv()`. Each call produces a map of key-value pairs that Gas Town passes to the tmux session before starting the agent process.
+
+Agents do not need to source any files — the variables are present in the environment from process start.
+
+---
+
+## Verifying variables with `gt doctor`
+
+`gt doctor` checks that running tmux sessions have the correct environment variables. It compares the expected values for each session against what is currently set and reports mismatches as warnings.
+
+```
+⚠ env-vars: Found 3 env var mismatch(es) across 1 session(s)
+    hq-mayor: missing GT_ROOT (expected "/home/user/gt")
+```
+
+To fix mismatches, restart sessions:
+
+```bash
+gt shutdown && gt up
+```
+
+<Tip>
+Run `gt doctor` after updating Gas Town or changing town root paths to catch stale environment values before they cause unexpected behavior.
+</Tip>

@@ -1,0 +1,128 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Gas Town",
+  "projectDescription": "A multi-agent workspace manager that orchestrates AI coding agents (Claude, Codex, Copilot, and others) with persistent work tracking via git-backed hooks.",
+  "theme": "aspen",
+  "primaryColor": "#73dff6",
+  "lightColor": "#37454c",
+  "darkColor": "#cfbdb2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/agents-and-roles",
+              "concepts/work-tracking",
+              "concepts/hooks-and-persistence"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "guides/mayor-workflow",
+              "guides/convoy-workflow",
+              "guides/formulas-and-molecules",
+              "guides/monitoring-and-health"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "guides/agent-integration",
+              "guides/wasteland-federation",
+              "guides/telemetry",
+              "guides/docker"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Command Reference",
+            "pages": [
+              "reference/workspace-commands",
+              "reference/agent-commands",
+              "reference/convoy-commands",
+              "reference/merge-queue-commands",
+              "reference/monitoring-commands"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "reference/configuration",
+              "reference/environment-variables",
+              "reference/agent-presets"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "reference/troubleshooting",
+              "reference/glossary"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-agent orchestration for Claude Code, GitHub Copilot, Codex, Gemini, and other AI coding agents",
+    "Persistent work state via git-backed hooks that survive agent restarts and crashes",
+    "Convoy work tracking system bundling multiple beads (issues) for coordinated delivery",
+    "Built-in mailbox and inter-agent communication via nudges and mail",
+    "Bors-style merge queue (Refinery) with batch-then-bisect verification",
+    "Three-tier watchdog system (Witness, Deacon, Boot) for agent health monitoring",
+    "Federated work coordination via Wasteland/DoltHub integration",
+    "Activity feed TUI (gt feed) and web dashboard for real-time monitoring",
+    "Scheduler for capacity-governed polecat dispatch to prevent API rate exhaustion",
+    "Formula/molecule system for TOML-defined repeatable multi-step workflows",
+    "Seance for querying previous agent sessions and recovering context",
+    "OpenTelemetry metrics and structured logging to any OTLP-compatible backend"
+  ],
+  "publicApiSurface": [
+    "gt install",
+    "gt rig add/list/remove",
+    "gt crew add",
+    "gt mayor attach/start/detach",
+    "gt sling",
+    "gt convoy create/list/show/add",
+    "gt agents",
+    "gt feed",
+    "gt dashboard",
+    "gt escalate",
+    "gt scheduler status/pause/resume",
+    "gt seance",
+    "gt mq list/submit/retry/reject",
+    "gt mq integration create/land",
+    "gt nudge",
+    "gt mail inbox/read/send",
+    "gt handoff",
+    "gt prime",
+    "gt done",
+    "gt doctor",
+    "gt config agent list/set/get/remove",
+    "gt config default-agent",
+    "gt wl join/browse/claim/done/post",
+    "gt formula run",
+    "gt completion bash/zsh/fish",
+    "bd ready/list/show/create/update/close",
+    "bd formula list",
+    "bd cook",
+    "bd mol pour/list/squash"
+  ]
+}

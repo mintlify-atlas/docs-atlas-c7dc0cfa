@@ -1,0 +1,532 @@
+---
+title: "Troubleshooting"
+description: "Diagnosis and fixes for common Gas Town problems: installation, daemon startup, agents, beads, git, convoy, and merge queue issues."
+---
+
+Run `gt doctor --fix` first for many issues — it automatically repairs the most common problems including missing settings files, stale worktrees, and legacy sparse checkout configuration.
+
+```bash
+gt doctor --fix
+gt doctor --verbose   # Show all checks with detail
+```
+
+---
+
+## Installation issues
+
+<AccordionGroup>
+  <Accordion title="`gt: command not found`">
+    The Go bin directory is not in your PATH.
+
+    **Diagnosis:**
+    ```bash
+    echo $PATH
+    ls ~/go/bin/gt
+    ```
+
+    **Fix:** Add the Go bin directory to your shell profile and reload it:
+    ```bash
+    echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bashrc
+    source ~/.bashrc
+    ```
+
+    For Zsh:
+    ```bash
+    echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.zshrc
+    source ~/.zshrc
+    ```
+
+    Then verify:
+    ```bash
+    gt version
+    ```
+  </Accordion>
+
+  <Accordion title="`bd: command not found`">
+    The Beads CLI is not installed.
+
+    **Fix:** Install it with:
+    ```bash
+    go install github.com/steveyegge/beads/cmd/bd@latest
+    ```
+
+    Then verify:
+    ```bash
+    bd version
+    ```
+
+    If `bd` is still not found after installation, ensure `$HOME/go/bin` is in your PATH (see above).
+  </Accordion>
+
+  <Accordion title="Go binary version too old">
+    Gas Town requires Go 1.24 or later.
+
+    **Diagnosis:**
+    ```bash
+    go version
+    ```
+
+    **Fix (macOS):**
+    ```bash
+    brew upgrade go
+    ```
+
+    **Fix (Linux):** Download the latest release from [go.dev/dl](https://go.dev/dl) and reinstall:
+    ```bash
+    wget https://go.dev/dl/go1.24.12.linux-amd64.tar.gz
+    sudo rm -rf /usr/local/go
+    sudo tar -C /usr/local -xzf go1.24.12.linux-amd64.tar.gz
+    ```
+  </Accordion>
+
+  <Accordion title="Dolt not found or version too old">
+    Gas Town requires Dolt 1.82.4 or later for beads storage.
+
+    **Diagnosis:**
+    ```bash
+    dolt version
+    ```
+
+    **Fix:** Follow the [Dolt installation guide](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) for your platform. Then verify:
+    ```bash
+    dolt version   # Should show 1.82.4 or higher
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Daemon and startup issues
+
+<AccordionGroup>
+  <Accordion title="Daemon not starting">
+    The daemon requires tmux to manage agent sessions.
+
+    **Diagnosis:**
+    ```bash
+    tmux -V
+    tmux new-session -d -s test && tmux kill-session -t test
+    ```
+
+    If tmux is missing, install it:
+    ```bash
+    # macOS
+    brew install tmux
+
+    # Debian/Ubuntu
+    sudo apt install -y tmux
+
+    # Fedora/RHEL
+    sudo dnf install -y tmux
+    ```
+
+    If tmux is present but the daemon still fails, check the daemon log:
+    ```bash
+    gt doctor --verbose
+    ```
+  </Accordion>
+
+  <Accordion title="tmux sessions not starting for agents">
+    Agent sessions may fail to start if the workspace was not fully initialized.
+
+    **Diagnosis:**
+    ```bash
+    gt status
+    gt doctor
+    ```
+
+    **Fix:** Complete workspace initialization:
+    ```bash
+    cd ~/gt
+    gt enable
+    gt git-init
+    gt up
+    ```
+
+    If sessions were previously running with stale environment variables, restart everything:
+    ```bash
+    gt shutdown
+    gt doctor --fix
+    gt up
+    ```
+  </Accordion>
+
+  <Accordion title="Sessions start but agents do not receive context">
+    Agents may start without receiving their Gas Town role context if hooks are not installed or the startup fallback failed.
+
+    **Diagnosis:**
+    ```bash
+    # Attach to the affected session and check
+    gt mayor attach
+    # Inside the session, run:
+    gt prime
+    ```
+
+    **Fix:** Reinstall settings files for all roles:
+    ```bash
+    gt install
+    gt doctor --fix
+    ```
+
+    For Claude Code agents specifically, verify the settings file exists:
+    ```bash
+    ls ~/gt/mayor/.claude/settings.json
+    ls ~/gt/<rig>/polecats/.claude/settings.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Agent issues
+
+<AccordionGroup>
+  <Accordion title="Agents lose connection">
+    Hooks may not be properly initialized.
+
+    **Diagnosis:**
+    ```bash
+    gt hooks list
+    ```
+
+    **Fix:**
+    ```bash
+    gt hooks sync
+    ```
+
+    After syncing, restart affected sessions:
+    ```bash
+    gt shutdown && gt up
+    ```
+  </Accordion>
+
+  <Accordion title="Agent in the wrong working directory">
+    Each role has a specific expected working directory. Running in the wrong directory causes agents to use incorrect settings or miss their beads database.
+
+    **Expected directories by role:**
+
+    | Role | Working directory |
+    |------|-------------------|
+    | Mayor | `~/gt/mayor/` |
+    | Deacon | `~/gt/deacon/` |
+    | Witness | `~/gt/<rig>/witness/` |
+    | Refinery | `~/gt/<rig>/refinery/rig/` |
+    | Crew | `~/gt/<rig>/crew/<name>/rig/` |
+    | Polecat | `~/gt/<rig>/polecats/<name>/rig/` |
+
+    **Diagnosis:**
+    ```bash
+    gt doctor
+    # Check the "cwd" field in the output for each session
+    ```
+
+    **Fix:** Restart the affected agent:
+    ```bash
+    gt session stop <rig>/<role>
+    gt up
+    ```
+  </Accordion>
+
+  <Accordion title="Mayor not responding">
+    **Diagnosis:**
+    ```bash
+    gt peek mayor
+    ```
+
+    **Fix:** Detach and reattach the Mayor session:
+    ```bash
+    gt mayor detach
+    gt mayor attach
+    ```
+
+    If the session is completely unresponsive, restart it:
+    ```bash
+    gt mayor restart
+    ```
+  </Accordion>
+
+  <Accordion title="Polecat stuck on a task">
+    **Diagnosis:**
+    ```bash
+    gt peek <rig>/polecats/<name>
+    gt feed --problems
+    ```
+
+    **Fix:** Send a nudge to unblock, then check status:
+    ```bash
+    gt nudge <rig>/polecats/<name> "Status check — are you blocked?"
+    gt peek <rig>/polecats/<name>
+    ```
+
+    If unresponsive, trigger a handoff (session refresh):
+    ```bash
+    # From inside the Mayor or from the CLI
+    gt nudge <rig>/polecats/<name> "gt handoff"
+    ```
+  </Accordion>
+
+  <Accordion title="Agent settings from wrong source">
+    Customer repo settings leaking into Gas Town agent sessions, or Gas Town settings missing entirely.
+
+    **Diagnosis:**
+    ```bash
+    gt doctor
+    ```
+
+    **Fix:** Remove legacy sparse checkout and recreate settings:
+    ```bash
+    gt doctor --fix
+    ```
+
+    Verify the settings file hierarchy is correct:
+    ```bash
+    ls ~/gt/mayor/.claude/settings.json
+    ls ~/gt/<rig>/polecats/.claude/settings.json
+    ls ~/gt/<rig>/refinery/.claude/settings.json
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Beads and storage issues
+
+<AccordionGroup>
+  <Accordion title="`gt doctor` reports beads errors">
+    **Diagnosis:**
+    ```bash
+    gt doctor --verbose
+    cd ~/gt/<rig>/mayor/rig
+    bd status
+    bd doctor
+    ```
+
+    **Fix (auto-repair):**
+    ```bash
+    gt doctor --fix
+    ```
+
+    For deeper beads problems, run the beads health check directly:
+    ```bash
+    cd ~/gt/myproject/mayor/rig
+    bd doctor
+    ```
+  </Accordion>
+
+  <Accordion title="Beads prefix mismatch">
+    Bead IDs use prefixes that must match the rig's configured prefix. A mismatch means `bd show` cannot route to the correct database.
+
+    **Diagnosis:**
+    ```bash
+    BD_DEBUG_ROUTING=1 bd show <id>
+    cat ~/gt/<rig>/config.json   # Check beads.prefix
+    cat ~/gt/.beads/routes.jsonl # Check routing table
+    ```
+
+    **Fix:** Update the rig config to match the actual prefix, or re-route using:
+    ```bash
+    bd update gt-rig-<rig> --labels="beads_prefix:<correct-prefix>"
+    ```
+  </Accordion>
+
+  <Accordion title="Beads routing not working">
+    Routes are defined in `~/gt/.beads/routes.jsonl`. If a prefix cannot be resolved, `bd` commands will fail.
+
+    **Diagnosis:**
+    ```bash
+    BD_DEBUG_ROUTING=1 bd show <id>
+    cat ~/gt/.beads/routes.jsonl
+    ```
+
+    **Fix:** Re-register the rig to rebuild routing:
+    ```bash
+    gt rig remove <name>
+    gt rig add <name> <url>
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Git and worktree issues
+
+<AccordionGroup>
+  <Accordion title="Worktree conflicts">
+    Multiple agents targeting the same worktree path, or a worktree from a previous polecat session not cleaned up.
+
+    **Diagnosis:**
+    ```bash
+    gt doctor
+    git -C ~/gt/<rig>/mayor/rig worktree list
+    ```
+
+    **Fix (auto-repair):**
+    ```bash
+    gt doctor --fix
+    ```
+
+    To manually remove a stale worktree:
+    ```bash
+    git -C ~/gt/<rig>/mayor/rig worktree remove --force ~/gt/<rig>/polecats/<name>/rig
+    git -C ~/gt/<rig>/mayor/rig worktree prune
+    ```
+  </Accordion>
+
+  <Accordion title="Dirty git state blocking handoff or merge">
+    A polecat with uncommitted changes cannot hand off cleanly.
+
+    **Diagnosis:**
+    ```bash
+    git -C ~/gt/<rig>/polecats/<name>/rig status
+    ```
+
+    **Fix:** Commit or discard the changes, then retry:
+    ```bash
+    git -C ~/gt/<rig>/polecats/<name>/rig add -A
+    git -C ~/gt/<rig>/polecats/<name>/rig commit -m "wip: save state before handoff"
+    ```
+
+    Or discard:
+    ```bash
+    git -C ~/gt/<rig>/polecats/<name>/rig checkout -- .
+    ```
+  </Accordion>
+
+  <Accordion title="Git authentication issues">
+    Cloning rigs or pushing branches fails due to missing credentials.
+
+    **Diagnosis:**
+    ```bash
+    ssh -T git@github.com
+    git -C ~/gt/<rig>/mayor/rig remote -v
+    ```
+
+    **Fix (SSH):** Ensure your SSH key is added to the agent:
+    ```bash
+    ssh-add ~/.ssh/id_ed25519
+    ```
+
+    **Fix (HTTPS):** Configure a credential helper:
+    ```bash
+    git config --global credential.helper cache
+    # or for persistent storage:
+    git config --global credential.helper store
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Convoy issues
+
+<AccordionGroup>
+  <Accordion title="Convoy stuck or not progressing">
+    **Diagnosis:**
+    ```bash
+    gt convoy status <convoy-id>
+    gt feed --problems
+    ```
+
+    **Fix:** Force-refresh the convoy state:
+    ```bash
+    gt convoy refresh <convoy-id>
+    ```
+
+    Check if the assigned polecats are still alive:
+    ```bash
+    gt agents
+    gt peek <rig>/polecats/<name>
+    ```
+  </Accordion>
+
+  <Accordion title="Wrong formula type used with `gt sling`">
+    Using `gt sling` with a convoy-type formula fails with "convoy type not supported".
+
+    **Diagnosis:**
+    ```bash
+    gt formula show <name>   # Shows "Type: convoy" or "Type: workflow"
+    ```
+
+    **Fix:** Use `gt formula run` for convoy formulas:
+    ```bash
+    # Wrong — fails for convoy formulas
+    gt sling <formula> --on <bead-id> <rig>
+
+    # Correct — handles convoy dispatch
+    gt formula run <formula> --pr=123
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Merge queue issues
+
+<AccordionGroup>
+  <Accordion title="Merge request stuck in queue">
+    **Diagnosis:**
+    ```bash
+    gt mq list <rig>
+    gt mq status <id>
+    ```
+
+    **Fix:** Retry the merge request:
+    ```bash
+    gt mq retry <id>
+    ```
+
+    If the request has a conflict and `on_conflict` is set to `"assign_back"`, the issue is re-assigned to the original polecat for resolution.
+  </Accordion>
+
+  <Accordion title="Refinery not picking up merge requests">
+    **Diagnosis:**
+    ```bash
+    gt peek <rig>/refinery
+    gt doctor
+    ```
+
+    **Fix:** Check the Refinery's patrol state, then nudge it:
+    ```bash
+    gt nudge <rig>/refinery "Check merge queue"
+    ```
+
+    If it is unresponsive:
+    ```bash
+    gt session stop <rig>/refinery
+    gt up
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Copilot-specific issues
+
+<AccordionGroup>
+  <Accordion title="Copilot CLI not launching">
+    The `copilot` preset requires the GitHub Copilot CLI with specific organizational policies enabled.
+
+    **Requirements:**
+    1. Enterprise → Settings → AI controls → Copilot → **"Copilot in the CLI" = Enabled**
+    2. Org → Settings → Copilot → Policies → **"Copilot in the CLI" = Enabled**
+    3. User has a Copilot seat assigned
+
+    **Diagnosis:**
+    ```bash
+    copilot --version
+    gh auth status
+    ```
+
+    **Fix:** Enable the required policies in GitHub admin settings, then reauthenticate:
+    ```bash
+    gh auth login
+    gt start --agent copilot
+    ```
+  </Accordion>
+
+  <Accordion title="Copilot sessions taking longer to become ready">
+    The Copilot preset uses a 5-second ready delay instead of prompt-prefix detection, because Copilot CLI does not emit a detectable prompt string. This is expected behavior.
+
+    Sessions will take slightly longer to accept work than Claude-based agents. No fix is needed.
+  </Accordion>
+</AccordionGroup>

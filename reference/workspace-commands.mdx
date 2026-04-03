@@ -1,0 +1,443 @@
+---
+title: "Workspace commands"
+description: "Reference for workspace setup, rig management, configuration, and health commands."
+---
+
+## Installation
+
+### `gt install`
+
+Creates a new Gas Town workspace (HQ) at the specified path.
+
+```bash
+gt install <path>
+gt install ~/gt --git
+gt install ~/gt --shell
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--git` | Initialize a git repository inside the workspace after creating it |
+| `--shell` | Same as `--git`; initialize a git repo for the HQ |
+
+**What it creates:**
+
+```
+~/gt/
+├── CLAUDE.md          # Identity anchor — run `gt prime` after session start
+├── mayor/             # Mayor config and state
+├── rigs/              # Project containers (initially empty)
+└── .beads/            # Town-level issue tracking
+```
+
+<Note>
+Run `gt enable` and `gt git-init` after `gt install` to complete system-wide setup.
+</Note>
+
+---
+
+### `gt enable`
+
+Enables Gas Town system-wide after workspace creation.
+
+```bash
+gt enable
+```
+
+---
+
+### `gt git-init`
+
+Initializes a git repository for the HQ workspace directory.
+
+```bash
+gt git-init
+```
+
+---
+
+## Rig management
+
+Rigs are project containers. Each rig wraps a git repository and manages its associated agents (polecats, witness, refinery).
+
+### `gt rig add`
+
+Adds a project to the workspace by cloning its git repository.
+
+```bash
+gt rig add <name> <url>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Short name for the rig (e.g., `myproject`) |
+| `url` | Git remote URL to clone (e.g., `https://github.com/you/repo.git`) |
+
+**What it creates:**
+
+```
+~/gt/myproject/
+├── .beads/            # Project issue tracking
+├── mayor/rig/         # Mayor's clone (holds the canonical .beads/ database)
+├── refinery/rig/      # Merge queue processor worktree
+├── witness/           # Worker monitor
+└── polecats/          # Worker clones (created on demand)
+```
+
+```bash
+gt rig add myproject https://github.com/you/repo.git
+```
+
+---
+
+### `gt rig list`
+
+Lists all rigs registered in the workspace.
+
+```bash
+gt rig list
+```
+
+---
+
+### `gt rig remove`
+
+Removes a rig from the workspace.
+
+```bash
+gt rig remove <name>
+```
+
+---
+
+## Crew management
+
+### `gt crew add`
+
+Creates a persistent crew member workspace within a rig. Crew members are your personal working clone inside a project.
+
+```bash
+gt crew add <name> --rig <rig>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--rig <rig>` | The rig to create the crew workspace in |
+
+```bash
+gt crew add yourname --rig myproject
+cd ~/gt/myproject/crew/yourname
+```
+
+---
+
+## Workspace lifecycle
+
+### `gt up`
+
+Starts all workspace services (daemon, sessions, agents).
+
+```bash
+gt up
+gt up --restore
+gt up --quiet
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--restore` | Also restore crew (from settings) and polecats (from hooks) |
+| `-q`, `--quiet` | Only show errors |
+| `--json` | Output as JSON |
+
+---
+
+### `gt down`
+
+Stops workspace services gracefully.
+
+```bash
+gt down
+```
+
+---
+
+### `gt shutdown`
+
+Shuts down all running agent sessions and services.
+
+```bash
+gt shutdown
+```
+
+<Tip>
+After `gt shutdown`, run `gt up` to restart everything with a fresh environment. This also resolves environment variable mismatches detected by `gt doctor`.
+</Tip>
+
+---
+
+## Health and diagnostics
+
+### `gt doctor`
+
+Runs workspace health checks. Reports environment variable mismatches, stale worktrees, sparse-checkout issues, missing settings files, and other common problems.
+
+```bash
+gt doctor
+```
+
+**Example output:**
+
+```
+⚠ env-vars: Found 3 env var mismatch(es) across 1 session(s)
+    hq-mayor: missing GT_ROOT (expected "/home/user/gt")
+```
+
+---
+
+### `gt doctor --fix`
+
+Automatically repairs issues found by `gt doctor`. This includes removing legacy sparse checkout configuration and recreating missing settings files.
+
+```bash
+gt doctor --fix
+```
+
+<Note>
+`gt doctor --fix` does not restart running sessions. After fixing, run `gt shutdown && gt up` to apply environment changes.
+</Note>
+
+---
+
+### `gt status`
+
+Shows the current workspace status: active rigs, running agents, and service state.
+
+```bash
+gt status
+```
+
+---
+
+### `gt version`
+
+Prints the installed `gt` version.
+
+```bash
+gt version
+```
+
+---
+
+## Hook management
+
+Gas Town manages Claude Code and other agent hook/settings files centrally. The `gt hooks` command lets you edit and sync them across all agents.
+
+### `gt hooks sync`
+
+Regenerates all agent hook/settings files (`settings.json`, plugin files, etc.) from the base config and overrides. Run this after making changes to propagate them to all workers.
+
+```bash
+gt hooks sync
+```
+
+---
+
+### `gt hooks diff`
+
+Shows what `gt hooks sync` would change without making any modifications.
+
+```bash
+gt hooks diff
+gt hooks diff <target>
+```
+
+---
+
+### `gt hooks list`
+
+Shows all managed settings.json locations and their current sync status.
+
+```bash
+gt hooks list
+```
+
+---
+
+### `gt hooks base`
+
+Opens the shared base hook config for editing.
+
+```bash
+gt hooks base
+```
+
+---
+
+### `gt hooks override`
+
+Opens the hook override file for a specific role or rig for editing.
+
+```bash
+gt hooks override <target>
+```
+
+```bash
+gt hooks override crew       # Overrides for all crew workers
+gt hooks override myproject  # Overrides for myproject rig
+```
+
+---
+
+### `gt hooks scan`
+
+Scans the workspace for existing hook configurations.
+
+```bash
+gt hooks scan
+```
+
+---
+
+### `gt hooks registry`
+
+Lists available hooks from the registry.
+
+```bash
+gt hooks registry
+```
+
+---
+
+### `gt hooks install`
+
+Installs a hook from the registry.
+
+```bash
+gt hooks install <hook-name>
+```
+
+---
+
+## Configuration
+
+### Agent configuration
+
+#### `gt config agent list`
+
+Lists all available agents — both built-in presets and any custom aliases you have defined.
+
+```bash
+gt config agent list
+gt config agent list --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output in JSON format |
+
+**Built-in presets:** `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`, `pi`, `omp`
+
+---
+
+#### `gt config agent get`
+
+Shows the configuration for a specific agent.
+
+```bash
+gt config agent get <name>
+```
+
+```bash
+gt config agent get opencode
+```
+
+---
+
+#### `gt config agent set`
+
+Creates or updates a custom agent alias. Aliases encode a command and any model or flag options.
+
+```bash
+gt config agent set <name> <command>
+```
+
+```bash
+gt config agent set codex-low "codex --thinking low"
+gt config agent set claude-haiku "claude --model haiku --dangerously-skip-permissions"
+gt config agent set claude-glm "claude-glm --model glm-4"
+```
+
+<Note>
+Built-in presets cannot be removed, but they can be overridden with `gt config agent set`.
+</Note>
+
+---
+
+#### `gt config agent remove`
+
+Removes a custom agent alias. Built-in presets are protected and cannot be removed.
+
+```bash
+gt config agent remove <name>
+```
+
+---
+
+### Default agent
+
+#### `gt config default-agent`
+
+Gets or sets the town-wide default agent. When called with no argument, prints the current default. Pass a name to set a new default.
+
+```bash
+gt config default-agent           # Get current default
+gt config default-agent <name>    # Set default
+```
+
+```bash
+gt config default-agent claude-glm
+```
+
+**Agent resolution order:** rig-level → town-level → built-in presets.
+
+---
+
+## Shell completions
+
+### `gt completion bash`
+
+Outputs shell completion script for Bash.
+
+```bash
+gt completion bash > /etc/bash_completion.d/gt
+```
+
+---
+
+### `gt completion zsh`
+
+Outputs shell completion script for Zsh.
+
+```bash
+gt completion zsh > "${fpath[1]}/_gt"
+```
+
+---
+
+### `gt completion fish`
+
+Outputs shell completion script for Fish.
+
+```bash
+gt completion fish > ~/.config/fish/completions/gt.fish
+```

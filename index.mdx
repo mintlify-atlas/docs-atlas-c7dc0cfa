@@ -1,97 +1,100 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Gas Town"
+description: "Multi-agent workspace manager for orchestrating AI coding agents with persistent work tracking"
 ---
 
-## Setting up
+Gas Town lets you coordinate 20–30 AI coding agents (Claude Code, GitHub Copilot, Codex, Gemini, and others) working in parallel across your projects. Work state persists in git-backed hooks — agents survive restarts, crashes, and context resets without losing progress.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Gas Town and set up your first workspace in minutes
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Create your workspace, add a project, and run your first agent
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Core concepts" icon="book" href="/concepts/architecture">
+    Understand Towns, Rigs, Polecats, Hooks, and Convoys
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Command reference" icon="terminal" href="/reference/workspace-commands">
+    Full reference for every `gt` and `bd` command
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What Gas Town solves
 
-Everything you need to create world-class documentation.
+| Challenge | Gas Town solution |
+|-----------|------------------|
+| Agents lose context on restart | Work persists in git-backed hooks |
+| Manual agent coordination | Built-in mailboxes, identities, and handoffs |
+| 4–10 agents become chaotic | Scale comfortably to 20–30 agents |
+| Work state lost in agent memory | Work state stored in Beads ledger |
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Key workflows
 
-## Need inspiration?
+<CardGroup cols={2}>
+  <Card title="Mayor workflow" icon="hat-wizard" href="/guides/mayor-workflow">
+    Let the Mayor AI coordinator orchestrate your agents end-to-end
+  </Card>
+  <Card title="Convoy tracking" icon="truck" href="/guides/convoy-workflow">
+    Bundle related issues into Convoys for coordinated delivery
+  </Card>
+  <Card title="Formulas & molecules" icon="flask" href="/guides/formulas-and-molecules">
+    Define repeatable multi-step workflows as TOML formulas
+  </Card>
+  <Card title="Monitoring & health" icon="heart-pulse" href="/guides/monitoring-and-health">
+    Activity feed, dashboard, and three-tier watchdog system
+  </Card>
+</CardGroup>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## Agent support
+
+Gas Town works with all major AI coding agents out of the box:
+
+<CardGroup cols={3}>
+  <Card title="Claude Code" icon="robot" href="/guides/agent-integration">
+    Full hooks integration with session resume
+  </Card>
+  <Card title="GitHub Copilot" icon="github" href="/guides/agent-integration">
+    Executable lifecycle hooks via JSON config
+  </Card>
+  <Card title="Codex CLI" icon="openai" href="/guides/agent-integration">
+    Wrapper-based integration with gt-codex
+  </Card>
+  <Card title="Gemini CLI" icon="google" href="/guides/agent-integration">
+    Hook-based integration with session resume
+  </Card>
+  <Card title="OpenCode" icon="code" href="/guides/agent-integration">
+    JS plugin integration with ACP support
+  </Card>
+  <Card title="Custom agents" icon="plus" href="/reference/agent-presets">
+    Register any CLI agent via JSON preset
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Install Gas Town">
+    ```bash
+    brew install gastown
+    # or: go install github.com/steveyegge/gastown/cmd/gt@latest
+    ```
+  </Step>
+  <Step title="Create your workspace">
+    ```bash
+    gt install ~/gt --git
+    cd ~/gt
+    ```
+  </Step>
+  <Step title="Add a project">
+    ```bash
+    gt rig add myproject https://github.com/you/repo.git
+    ```
+  </Step>
+  <Step title="Start the Mayor">
+    ```bash
+    gt mayor attach
+    ```
+    Tell the Mayor what you want to build — it handles the rest.
+  </Step>
+</Steps>

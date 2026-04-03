@@ -1,0 +1,166 @@
+---
+title: "Mayor workflow"
+description: "The recommended workflow for coordinating complex multi-agent work using the Mayor as your AI orchestrator."
+---
+
+## What is the Mayor?
+
+The Mayor is a Claude Code instance with full context about your workspace, projects, and agents. It acts as your primary AI coordinator — you describe what you want to accomplish, and the Mayor handles the orchestration: breaking work into tasks, creating convoys, spawning polecats, and monitoring progress.
+
+Starting with the Mayor is the recommended path for any multi-agent work. You interact with it through a persistent tmux session.
+
+## The MEOW pattern
+
+MEOW (Mayor-Enhanced Orchestration Workflow) is the standard seven-step pattern for Mayor-driven work:
+
+<Steps>
+  <Step title="Tell the Mayor">
+    Attach to the Mayor session and describe your goal in plain language. You don't need to structure this as commands — the Mayor understands natural language requests.
+
+    ```bash
+    gt mayor attach
+    ```
+
+    Then describe your goal, for example: "Build an authentication system with login, registration, and password reset."
+  </Step>
+  <Step title="Mayor analyzes">
+    The Mayor breaks your goal into discrete tasks. It examines existing issues in your beads tracker, identifies gaps, and creates or selects the beads that represent the work to be done.
+  </Step>
+  <Step title="Convoy creation">
+    The Mayor creates a convoy to track all related work as a single unit. The convoy gets a `hq-cv-*` ID and tracks every bead involved in the goal.
+
+    ```bash
+    # Mayor runs this on your behalf
+    gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify --human
+    ```
+  </Step>
+  <Step title="Agent spawning">
+    The Mayor spawns polecat worker agents appropriate for each task, assigning them to the correct rigs. Each polecat gets a persistent identity and its work is stored in a git-backed hook.
+  </Step>
+  <Step title="Work distribution">
+    Beads are slung to agents via `gt sling`, which hooks each bead to a polecat's sandbox. The agent reads its work assignment via `gt prime` at session start.
+
+    ```bash
+    # Mayor distributes work
+    gt sling gt-x7k2m myproject
+    gt sling gt-p9n4q myproject
+    ```
+  </Step>
+  <Step title="Progress monitoring">
+    The Mayor monitors progress through convoy status and agent health. You can check at any time:
+
+    ```bash
+    gt convoy list          # Active convoys and progress
+    gt agents               # All running agent sessions
+    ```
+  </Step>
+  <Step title="Completion">
+    When all tracked beads close, the convoy lands. You receive a notification listing every completed issue and the total duration. The Mayor summarizes the results and flags any issues that need your attention.
+  </Step>
+</Steps>
+
+## Step-by-step: running the Mayor workflow
+
+### 1. Start the Mayor session
+
+```bash
+gt mayor attach
+```
+
+If no Mayor session exists, this creates one. If one is already running, it reattaches. To start a Mayor session with a specific agent runtime:
+
+```bash
+gt mayor start --agent auggie
+```
+
+### 2. Describe your goal
+
+Once attached, tell the Mayor what you want to accomplish. Be specific about scope but don't over-specify implementation details — the Mayor will ask clarifying questions if needed.
+
+**Examples of effective prompts:**
+- "Implement GitHub OAuth login for the API, including token refresh and revocation."
+- "Fix all open P1 bugs in the gastown rig."
+- "Run the release process for version 2.1.0."
+
+### 3. Let the Mayor create the convoy
+
+The Mayor creates a convoy and assigns work. You can observe this by watching the convoy list update:
+
+```bash
+gt convoy list
+```
+
+### 4. Track progress
+
+Check in periodically. The convoy list shows how many beads are closed vs. open:
+
+```bash
+gt convoy list              # Summary of all active convoys
+gt convoy show hq-cv-abc    # Detailed view of a specific convoy
+gt agents                   # All active polecat sessions
+```
+
+### 5. Detach and return
+
+You don't need to stay attached to the Mayor. Detach and check back later:
+
+```bash
+# Detach without stopping the session
+# Press Ctrl+B then D in tmux
+```
+
+To return:
+```bash
+gt mayor attach
+```
+
+To stop the Mayor session entirely:
+```bash
+gt mayor detach
+```
+
+## Key commands
+
+| Command | Description |
+|---------|-------------|
+| `gt mayor attach` | Attach to (or create) the Mayor session |
+| `gt mayor start` | Start a new Mayor session |
+| `gt mayor start --agent <alias>` | Start Mayor with a specific agent runtime |
+| `gt mayor detach` | Stop the Mayor session |
+| `gt convoy list` | List all active convoys and progress |
+| `gt convoy show [id]` | Show detailed convoy status |
+| `gt agents` | List all active agent sessions |
+
+## When to use the Mayor vs. manual workflows
+
+| Situation | Use Mayor | Use manual |
+|-----------|-----------|------------|
+| Complex multi-issue work | Yes | |
+| Unfamiliar codebase | Yes | |
+| Repeated, predefined processes | | Use [formulas](/guides/formulas-and-molecules) |
+| Single well-defined task | | Use [convoy workflow](/guides/convoy-workflow) |
+| Direct control over agent assignment | | Use [convoy workflow](/guides/convoy-workflow) |
+| Exploratory or prototype work | Yes | |
+
+## Tips for effective Mayor use
+
+<Tip>
+Always start with the Mayor for new features or bug sprints. It has full workspace context and will make better agent assignment decisions than manual slinging for complex work.
+</Tip>
+
+<Tip>
+Give the Mayor concrete success criteria. Instead of "improve the API", say "the API should return 401 on invalid tokens and include a `retry_after` header on rate limit responses." Clear criteria help the Mayor write better bead descriptions.
+</Tip>
+
+<Tip>
+Use `gt feed` while the Mayor is running to watch agent activity in real time. Press `p` to switch to the problems view if you suspect an agent is stuck.
+</Tip>
+
+<Tip>
+If the Mayor is unresponsive or its session has died, restart it cleanly:
+
+```bash
+gt mayor detach
+gt mayor attach
+```
+</Tip>

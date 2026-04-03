@@ -1,0 +1,348 @@
+---
+title: "Monitoring commands"
+description: "Reference for the activity feed, web dashboard, escalation, scheduler, health checks, and emergency stop commands."
+---
+
+## Activity feed
+
+### `gt feed`
+
+Launches an interactive terminal dashboard (TUI) for monitoring all agent activity in real-time. Combines beads activity, agent events, and merge queue updates into a three-panel interface.
+
+**Panels:**
+
+- **Agent Tree** — Hierarchical view of all agents grouped by rig and role
+- **Convoy Panel** — In-progress and recently-landed convoys
+- **Event Stream** — Chronological feed of creates, completions, slings, nudges, and more
+
+```bash
+gt feed
+gt feed --problems
+gt feed --plain
+gt feed --window
+gt feed --since 1h
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--problems` | Start directly in problems view (stuck agent detection) |
+| `--plain` | Plain text output — no TUI, suitable for piping or logging |
+| `--window` | Open the feed in a dedicated tmux window |
+| `--since <duration>` | Show only events from the last `<duration>` (e.g., `1h`, `30m`, `2h`) |
+
+---
+
+### TUI navigation
+
+| Key | Action |
+|-----|--------|
+| `j` | Scroll down |
+| `k` | Scroll up |
+| `Tab` | Switch to the next panel |
+| `1` | Jump to Agent Tree panel |
+| `2` | Jump to Convoy panel |
+| `3` | Jump to Event Stream panel |
+| `p` | Toggle problems view |
+| `n` | Nudge the selected agent (problems view) |
+| `h` | Handoff / refresh context for selected agent (problems view) |
+| `?` | Show help |
+| `q` | Quit |
+
+---
+
+### Problems view
+
+At scale (20–50+ agents), spotting stuck agents in the activity stream becomes difficult. Press `p` in `gt feed` or start with `gt feed --problems` to toggle the problems view.
+
+The problems view groups agents by health state:
+
+| State | Condition |
+|-------|-----------|
+| **GUPP Violation** | Agent has hooked work with no progress for an extended period |
+| **Stalled** | Agent has hooked work with reduced progress |
+| **Zombie** | tmux session is dead but the agent record still exists |
+| **Working** | Agent is active and progressing normally |
+| **Idle** | No hooked work assigned |
+
+Use `n` to nudge a selected agent and `h` to trigger a handoff (context refresh) directly from the problems view.
+
+---
+
+## Web dashboard
+
+### `gt dashboard`
+
+Starts the web dashboard for monitoring your workspace. Provides a single-page overview of agents, convoys, hooks, queues, issues, and escalations. Auto-refreshes via htmx and includes a command palette for running `gt` commands from the browser.
+
+Must be run from inside a Gas Town workspace (HQ) directory.
+
+```bash
+gt dashboard
+gt dashboard --port 3000
+gt dashboard --open
+```
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port <n>` | `8080` | Port to serve the dashboard on |
+| `--open` | — | Automatically open the dashboard in the default browser after starting |
+
+```bash
+# Default port 8080
+gt dashboard
+
+# Custom port
+gt dashboard --port 3000
+
+# Start and open in browser
+gt dashboard --open
+```
+
+---
+
+## Escalation
+
+When agents hit blockers they cannot resolve, they escalate rather than waiting. Escalations route through Deacon → Mayor → Overseer based on severity.
+
+### `gt escalate`
+
+Creates an escalation bead and routes it based on severity.
+
+```bash
+gt escalate "<topic>"
+gt escalate -s CRITICAL "<message>"
+gt escalate -s HIGH "<message>"
+gt escalate -s MEDIUM "<message>" -m "<details>"
+```
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-s <level>` | `MEDIUM` | Severity level: `CRITICAL`, `HIGH`, or `MEDIUM` |
+| `-m "<text>"` | — | Additional detail message |
+
+**Severity levels:**
+
+| Level | Priority | Description |
+|-------|----------|-------------|
+| `CRITICAL` | P0 | Requires immediate attention |
+| `HIGH` | P1 | Important blocker |
+| `MEDIUM` | P2 | Notable issue, can be scheduled |
+
+```bash
+# Default severity (MEDIUM)
+gt escalate "Cannot resolve merge conflict in auth module"
+
+# High severity blocker
+gt escalate -s HIGH "CI pipeline broken, blocking all merges"
+
+# Critical with detail
+gt escalate -s CRITICAL "Production deploy failing" -m "Error: timeout on DB migration step"
+```
+
+---
+
+### `gt escalate list`
+
+Lists all open escalation beads.
+
+```bash
+gt escalate list
+```
+
+---
+
+### `gt escalate ack`
+
+Acknowledges an escalation bead, indicating it has been reviewed and is being handled.
+
+```bash
+gt escalate ack <bead-id>
+```
+
+```bash
+gt escalate ack hq-abc12
+```
+
+---
+
+## Scheduler
+
+The scheduler is a capacity governor for polecat dispatch. It prevents API rate limit exhaustion by controlling how many polecats can be active concurrently. The default mode dispatches immediately; set `scheduler.max_polecats` to enable deferred dispatch via the daemon.
+
+### `gt scheduler status`
+
+Shows the current scheduler state: mode, capacity limit, active polecats, and queue depth.
+
+```bash
+gt scheduler status
+```
+
+---
+
+### `gt scheduler pause`
+
+Pauses polecat dispatch. New work is queued but no new polecats are spawned until dispatch resumes.
+
+```bash
+gt scheduler pause
+```
+
+---
+
+### `gt scheduler resume`
+
+Resumes polecat dispatch after a pause.
+
+```bash
+gt scheduler resume
+```
+
+---
+
+### `gt config set scheduler.max_polecats`
+
+Sets the maximum number of concurrently active polecats. Set to `-1` to disable the scheduler (default: immediate dispatch).
+
+```bash
+gt config set scheduler.max_polecats <n>
+```
+
+```bash
+# Limit to 5 concurrent polecats
+gt config set scheduler.max_polecats 5
+
+# Disable scheduler (dispatch immediately)
+gt config set scheduler.max_polecats -1
+```
+
+---
+
+## Health checks
+
+### `gt deacon health-check`
+
+Sends a health check ping to a specific agent and tracks whether the agent responds. Used by the Deacon's patrol cycle.
+
+```bash
+gt deacon health-check <agent>
+```
+
+```bash
+gt deacon health-check witness
+gt deacon health-check myproject/polecats/alpha
+```
+
+---
+
+### `gt deacon health-state`
+
+Shows the health check state for all known agents: last ping time, response status, and any detected anomalies.
+
+```bash
+gt deacon health-state
+```
+
+---
+
+## Emergency stop
+
+### `gt stop --all`
+
+Kills all running agent sessions across all rigs immediately.
+
+```bash
+gt stop --all
+```
+
+<Warning>
+`gt stop --all` terminates sessions without graceful shutdown. Any work not committed to git or beads may be lost. Use `gt down` or `gt shutdown` for graceful stops.
+</Warning>
+
+---
+
+### `gt stop --rig`
+
+Kills all agent sessions in a specific rig.
+
+```bash
+gt stop --rig <name>
+```
+
+```bash
+gt stop --rig myproject
+```
+
+---
+
+## Mail
+
+Agents communicate via a persistent mail system that survives session restarts. Unlike `gt nudge` (which delivers messages to a live session), mail persists until read.
+
+### `gt mail inbox`
+
+Lists messages in the current agent's inbox.
+
+```bash
+gt mail inbox
+```
+
+---
+
+### `gt mail read`
+
+Reads a specific mail message by ID.
+
+```bash
+gt mail read <id>
+```
+
+---
+
+### `gt mail send`
+
+Sends a mail message to another agent or to the human overseer.
+
+```bash
+gt mail send <address> -s "<subject>" -m "<body>"
+gt mail send <address> -s "<subject>" --stdin
+gt mail send --human -s "<subject>" -m "<body>"
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `address` | Recipient address, e.g., `mayor/`, `myproject/crew/alice` |
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `-s "<subject>"` | Message subject |
+| `-m "<body>"` | Message body (for short messages) |
+| `--stdin` | Read the message body from standard input (for multi-line content) |
+| `--human` | Send to the human overseer |
+
+```bash
+# Short message
+gt mail send mayor/ -s "Status" -m "PR review complete"
+
+# Multi-line message via stdin
+gt mail send myproject/crew/alice -s "PR Review" --stdin <<'BODY'
+The auth module PR is ready for review.
+Focus on the token refresh logic in src/auth/refresh.go.
+BODY
+
+# Message to the human overseer
+gt mail send --human -s "Blocked" -m "Waiting on credentials for external API"
+```
+
+<Tip>
+For time-sensitive delivery, combine mail with `gt nudge`: send the mail for persistence, then nudge to wake the recipient.
+</Tip>

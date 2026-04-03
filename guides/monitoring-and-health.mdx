@@ -1,0 +1,221 @@
+---
+title: "Monitoring and health"
+description: "Tools and systems for observing agent activity, detecting problems, and keeping your Gas Town workspace healthy at scale."
+---
+
+## The `gt feed` TUI
+
+`gt feed` launches an interactive terminal dashboard that combines beads activity, agent events, and merge queue updates into a single real-time view.
+
+```bash
+gt feed                      # Launch TUI dashboard
+gt feed --problems           # Start directly in problems view
+gt feed --plain              # Plain text output (no TUI)
+gt feed --window             # Open in a dedicated tmux window
+gt feed --since 1h           # Show events from the last hour
+```
+
+### Panels
+
+The TUI is divided into three panels:
+
+| Panel | Contents |
+|-------|----------|
+| **Agent Tree** | Hierarchical view of all agents grouped by rig and role |
+| **Convoy Panel** | In-progress and recently-landed convoys |
+| **Event Stream** | Chronological feed of creates, completions, slings, nudges, and more |
+
+### Navigation keys
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Scroll down / up |
+| `Tab` | Switch to next panel |
+| `1` / `2` / `3` | Jump directly to a panel |
+| `p` | Toggle problems view |
+| `?` | Show help |
+| `q` | Quit |
+
+## Problems view
+
+At scale (20–50+ agents), the event stream becomes too noisy to spot stuck agents. The problems view surfaces agents that need human attention by analyzing structured beads data.
+
+Press `p` in `gt feed` (or start with `gt feed --problems`) to toggle the problems view. Agents are grouped by health state:
+
+| State | Condition |
+|-------|-----------|
+| **GUPP Violation** | Agent has hooked work but no progress for an extended period |
+| **Stalled** | Agent has hooked work but reduced progress |
+| **Zombie** | Dead tmux session with live work |
+| **Working** | Active and progressing normally |
+| **Idle** | No hooked work assigned |
+
+### Intervention keys (problems view)
+
+| Key | Action |
+|-----|--------|
+| `n` | Nudge the selected agent |
+| `h` | Handoff (refresh the agent's context) |
+
+<Tip>
+Check the problems view before your standup or after leaving agents overnight. GUPP violations and zombies are the most common causes of stalled convoys.
+</Tip>
+
+## The `gt dashboard` web UI
+
+The web dashboard gives you a single-page overview of your entire workspace from a browser.
+
+```bash
+gt dashboard                 # Start on default port 8080
+gt dashboard --port 3000     # Start on a custom port
+gt dashboard --open          # Start and open in browser automatically
+```
+
+The dashboard shows agents, convoys, hooks, queues, issues, and escalations. It auto-refreshes via htmx and includes a command palette for running `gt` commands directly from the browser.
+
+<Note>
+The dashboard must be run from inside a Gas Town workspace (HQ) directory.
+</Note>
+
+## Three-tier watchdog chain
+
+Gas Town uses a layered watchdog system to keep agents healthy automatically. Each tier can resolve problems independently; issues it cannot handle escalate to the next tier.
+
+<Steps>
+  <Step title="Daemon">
+    The Go daemon process runs a heartbeat every 3 minutes. It performs mechanical checks: session liveness, GUPP violations (hooked work with no progress), orphaned beads, and hung sessions.
+
+    The daemon does not make judgment calls. It sends structured lifecycle messages to the Witness and dispatches the Boot/Deacon agent for intelligent triage.
+
+    ```
+    Daemon (Go process) ← heartbeat every 3 min
+    ```
+  </Step>
+  <Step title="Boot and Deacon">
+    Boot is an AI agent dispatched by the daemon for intelligent triage. The Deacon is a persistent AI supervisor that runs continuous patrol cycles across all rigs.
+
+    The Deacon checks agent health, dispatches Dogs for maintenance tasks, detects stale escalations, and escalates issues that individual Witnesses cannot resolve.
+
+    ```
+    └── Boot (AI agent) ← intelligent triage
+        └── Deacon (AI agent) ← continuous patrol
+    ```
+  </Step>
+  <Step title="Witnesses and Refineries">
+    Each rig has its own Witness and Refinery. The Witness monitors polecats in its rig: detecting zombies, orphaned beads, and stalled agents, triggering recovery (nudge or handoff), and managing the cleanup pipeline. The Refinery handles the merge queue for the rig.
+
+    ```
+    └── Witnesses & Refineries ← per-rig agents
+    ```
+  </Step>
+</Steps>
+
+### Full watchdog hierarchy
+
+```
+Daemon (Go process) ← heartbeat every 3 min
+    └── Boot (AI agent) ← intelligent triage
+        └── Deacon (AI agent) ← continuous patrol
+            └── Witnesses & Refineries ← per-rig agents
+```
+
+**Key property:** If any single patrol agent fails, the others detect the resulting state and compensate. The daemon detects dead sessions. The Deacon detects dead Witnesses. The Witness detects dead polecats.
+
+## Witness (per-rig monitor)
+
+Each rig runs a Witness that patrols its polecats on every cycle:
+
+1. Check inbox — process lifecycle messages from the daemon and Refinery
+2. Detect zombie polecats — kill and recover or escalate
+3. Detect orphaned beads — reset status and notify the Deacon for re-dispatch
+4. Detect stalled polecats — nudge or escalate
+5. Check for pending spawns — process spawn requests
+6. Write patrol receipt — machine-readable summary for the audit trail
+
+The Witness delegates work rather than implementing it directly. It is the authority on per-rig polecat health.
+
+## Deacon (cross-rig supervisor)
+
+The Deacon runs continuous patrol cycles across all rigs. Key responsibilities:
+
+- Monitor Witness health across all rigs; nudge or restart stale Witnesses
+- Detect cross-rig convoy issues (stranded convoys with no active polecats)
+- Run `gt escalate stale` to re-escalate unacknowledged escalations
+- Forward unresolvable issues to the Mayor
+
+## Escalation
+
+When agents hit blockers they cannot resolve, they escalate rather than waiting:
+
+```bash
+gt escalate -s MEDIUM "Description of blocker"
+gt escalate -s HIGH "Important blocker, needs human soon"
+gt escalate -s CRITICAL "System-threatening issue"
+
+gt escalate list                          # List open escalations
+gt escalate list --severity=HIGH          # Filter by severity
+gt escalate ack <bead-id>                 # Acknowledge (prevents re-escalation)
+gt escalate close <bead-id>              # Close a resolved escalation
+```
+
+### Severity levels and routing
+
+| Severity | Priority | Route |
+|----------|----------|-------|
+| `MEDIUM` | P2 | Bead + mail to Mayor |
+| `HIGH` | P1 | Bead + mail to Mayor + email to human |
+| `CRITICAL` | P0 | Bead + mail to Mayor + email + SMS |
+
+Escalations route through Deacon → Mayor → Overseer. Each tier can resolve or forward. The chain is tracked via bead comments. Unacknowledged escalations are automatically re-escalated by the Deacon patrol (MEDIUM → HIGH → CRITICAL) after the stale threshold (default: 4 hours).
+
+<Warning>
+Escalations are for genuine blockers: merge conflicts that can't be auto-resolved, architectural decisions, security issues, and stuck loops. Don't escalate for normal workflow steps or transient errors that will auto-retry.
+</Warning>
+
+## Scheduler management
+
+The scheduler controls how many polecats can be dispatched concurrently, preventing API rate limit exhaustion.
+
+```bash
+gt config set scheduler.max_polecats 5   # Enable deferred dispatch (max 5 concurrent)
+gt config set scheduler.max_polecats -1  # Direct dispatch (default, no limit)
+
+gt scheduler status                      # Show scheduler state and queued count
+gt scheduler list                        # List scheduled beads by rig
+gt scheduler pause                       # Pause all dispatch town-wide
+gt scheduler resume                      # Resume dispatch
+gt scheduler run                         # Manually trigger a dispatch cycle
+gt scheduler clear                       # Remove all beads from the queue
+gt scheduler clear --bead gt-abc         # Remove a specific bead
+```
+
+By default (`max_polecats = -1`), `gt sling` dispatches immediately. When `max_polecats` is set to a positive number, the daemon dispatches incrementally on each heartbeat tick (every 3 minutes), respecting the cap.
+
+<Tip>
+For large batches of 5 or more issues, set `scheduler.max_polecats` to prevent simultaneous spawning from exhausting API rate limits and tmux resources.
+</Tip>
+
+## Health check commands
+
+| Command | Description |
+|---------|-------------|
+| `gt doctor` | Run workspace health diagnostics |
+| `gt peek` | Quick status snapshot of agents and convoys |
+| `gt deacon health-check` | Run a Deacon health check across all rigs |
+| `gt feed` | Real-time TUI dashboard |
+| `gt feed --problems` | Problems view for stuck agent detection |
+| `gt dashboard` | Web dashboard |
+| `gt escalate list` | List open escalations |
+| `gt scheduler status` | Show scheduler state |
+
+## Session discovery with `gt seance`
+
+`gt seance` discovers previous agent sessions via `.events.jsonl` logs, enabling agents to query predecessors for context and decisions from earlier work.
+
+```bash
+gt seance                              # List discoverable predecessor sessions
+gt seance --talk <id>                  # Full context conversation with predecessor
+gt seance --talk <id> -p "Question?"   # One-shot question to a predecessor session
+```
+
+This is useful after a crash or context compaction — an agent can ask its predecessor what it found, what decisions it made, and what work remains, without re-reading the entire codebase.

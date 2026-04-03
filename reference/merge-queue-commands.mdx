@@ -1,0 +1,288 @@
+---
+title: "Merge queue commands"
+description: "Reference for the Refinery merge queue, integration branches, and the gt done command."
+---
+
+## How the merge queue works
+
+Gas Town uses a **Bors-style bisecting merge queue**. Polecats never push directly to the default branch — all completed work flows through the Refinery:
+
+1. Polecat runs `gt done` → branch is pushed, a merge request (MR) bead is created
+2. The Refinery batches pending MRs into a test tip
+3. Verification gates run on the merged stack
+4. **If green:** all MRs in the batch merge to the default branch
+5. **If red:** the batch bisects to isolate the failing MR; passing MRs merge, the failing MR is re-queued or rejected
+
+This guarantees the default branch is always green.
+
+---
+
+## `gt done`
+
+Submits a polecat's completed work to the merge queue. Pushes the working branch, creates an MR bead, notifies the Witness, then syncs the worktree to main and transitions the polecat to IDLE.
+
+```bash
+gt done
+gt done --pre-verified
+gt done --status ESCALATED
+gt done --issue <bead-id>
+```
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--issue <id>` | auto-detected from branch | Source issue ID |
+| `--status <value>` | `COMPLETED` | Exit status: `COMPLETED`, `ESCALATED`, or `DEFERRED` |
+| `--pre-verified` | `false` | Mark MR as pre-verified (polecat ran gates after rebasing) — fast-paths the merge queue |
+| `--target <branch>` | auto-detected | Explicit MR target branch |
+| `-p`, `--priority <n>` | inherited | Override priority (0–4) |
+
+**Exit statuses:**
+
+| Status | Description |
+|--------|-------------|
+| `COMPLETED` | Work done, MR submitted (default) |
+| `ESCALATED` | Hit a blocker, needs human intervention (skips MR) |
+| `DEFERRED` | Work paused, issue still open (skips MR) |
+
+<Note>
+`gt done` is the standard polecat shutdown path. It is equivalent to `gt mq submit` followed by lifecycle cleanup. After `gt done`, the polecat transitions to IDLE (sandbox preserved for reuse).
+</Note>
+
+**Polecat shutdown sequence:**
+
+1. Work through the formula checklist (shown inline by `gt prime`)
+2. Run `gt done` to submit to the merge queue
+3. `gt done` syncs worktree to main, notifies Witness, transitions polecat to IDLE
+4. Witness can reassign the idle polecat to new work
+
+---
+
+## Merge queue management
+
+### `gt mq list`
+
+Shows the current merge queue for a rig. Displays all pending MRs, their status, and priority order.
+
+```bash
+gt mq list
+gt mq list <rig>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `rig` | Optional rig name to filter by |
+
+---
+
+### `gt mq next`
+
+Shows the highest-priority merge request in the queue — the one the Refinery will process next.
+
+```bash
+gt mq next
+gt mq next <rig>
+```
+
+---
+
+### `gt mq submit`
+
+Submits the current branch to the merge queue. Creates an MR bead for the Refinery to process.
+
+```bash
+gt mq submit
+```
+
+<Tip>
+Polecats should use `gt done` rather than `gt mq submit` directly. `gt done` handles submit plus sandbox cleanup in one step.
+</Tip>
+
+---
+
+### `gt mq status`
+
+Shows detailed status for a specific merge request, including test results, queue position, and history.
+
+```bash
+gt mq status <id>
+```
+
+---
+
+### `gt mq retry`
+
+Retries a failed merge request. Re-queues the MR for another test run.
+
+```bash
+gt mq retry <id>
+```
+
+---
+
+### `gt mq reject`
+
+Rejects a merge request and removes it from the queue.
+
+```bash
+gt mq reject <id>
+```
+
+---
+
+## Integration branches
+
+Integration branches are long-lived branches that collect related polecat work before it lands on the default branch. They support epic-scale feature development where many polecats contribute to a shared feature branch.
+
+### `gt mq integration create`
+
+Creates an integration branch for an epic bead. The branch name is derived from a configurable template.
+
+```bash
+gt mq integration create <epic-id>
+gt mq integration create <epic-id> --branch "<template>"
+gt mq integration create <epic-id> --base-branch <branch>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `epic-id` | The epic bead ID to create the integration branch for |
+
+**Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--branch <template>` | `integration/{title}` | Custom branch name template |
+| `--base-branch <name>` | `main` | Base branch to create the integration branch from |
+
+**Template variables for `--branch`:**
+
+| Variable | Description |
+|----------|-------------|
+| `{title}` | Sanitized epic title |
+| `{epic}` | Epic bead ID |
+| `{prefix}` | Rig prefix |
+| `{user}` | Current git user name |
+
+```bash
+# Default template
+gt mq integration create gt-epic-abc12
+
+# Custom branch template
+gt mq integration create gt-epic-abc12 --branch "feat/{title}"
+
+# Non-main base branch
+gt mq integration create gt-epic-abc12 --base-branch develop
+```
+
+---
+
+### `gt mq integration status`
+
+Shows the status of the integration branch for an epic: open child MRs, merged MRs, conflicts, and readiness to land.
+
+```bash
+gt mq integration status <epic-id>
+gt mq integration status <epic-id> --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output in JSON format |
+
+---
+
+### `gt mq integration land`
+
+Merges the integration branch into its base branch (default: `main`). All child MRs must be closed unless `--force` is used.
+
+```bash
+gt mq integration land <epic-id>
+gt mq integration land <epic-id> --dry-run
+gt mq integration land <epic-id> --force
+gt mq integration land <epic-id> --skip-tests
+gt mq integration land <epic-id> --base-branch <branch>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--branch <name>` | Integration branch name (if not derived from the epic) |
+| `--base-branch <name>` | Target branch to land into (default: `main`) |
+| `--dry-run` | Preview the land operation without making changes |
+| `--force` | Land even if there are open child MRs |
+| `--skip-tests` | Skip the test run before landing |
+
+```bash
+# Preview what would happen
+gt mq integration land gt-epic-abc12 --dry-run
+
+# Standard land
+gt mq integration land gt-epic-abc12
+
+# Land with open MRs (use with caution)
+gt mq integration land gt-epic-abc12 --force
+
+# Land without running tests
+gt mq integration land gt-epic-abc12 --skip-tests
+```
+
+<Warning>
+Using `--force` lands the integration branch even when child MRs are still open. Only use this if you are certain the open MRs do not affect the code being landed.
+</Warning>
+
+---
+
+## Merge queue configuration
+
+Merge queue behavior is configured in `~/gt/settings/config.json` under the `merge_queue` key.
+
+```json
+{
+  "merge_queue": {
+    "enabled": true,
+    "run_tests": true,
+    "setup_command": "pnpm install",
+    "test_command": "pnpm test",
+    "build_command": "go build ./...",
+    "on_conflict": "assign_back",
+    "delete_merged_branches": true
+  }
+}
+```
+
+**Configuration fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether the merge queue is active |
+| `run_tests` | `bool` | `true` | Run verification gates before merging |
+| `setup_command` | `string` | `""` | Setup/install command (e.g., `pnpm install`) |
+| `typecheck_command` | `string` | `""` | Type-check command (e.g., `tsc --noEmit`) |
+| `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`) |
+| `test_command` | `string` | `""` | Test command. Empty means skip. |
+| `build_command` | `string` | `""` | Build command (e.g., `go build ./...`) |
+| `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `assign_back` or `auto_rebase` |
+| `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
+| `retry_flaky_tests` | `int` | `1` | Number of times to retry a failing test before declaring flaky |
+| `poll_interval` | `string` | `"30s"` | How often the Refinery polls for new MRs |
+| `max_concurrent` | `int` | `1` | Maximum concurrent merges |
+| `integration_branch_polecat_enabled` | `bool` | `true` | Polecats auto-source worktrees from active integration branches |
+| `integration_branch_refinery_enabled` | `bool` | `true` | `gt done` / `gt mq submit` auto-target integration branches |
+| `integration_branch_template` | `string` | `"integration/{title}"` | Branch name template. Supports `{title}`, `{epic}`, `{prefix}`, `{user}` |
+| `integration_branch_auto_land` | `bool` | `false` | Refinery patrol automatically lands when all children are closed |
+
+**Conflict strategies:**
+
+| Value | Description |
+|-------|-------------|
+| `assign_back` | Return the conflicting MR to the polecat for resolution |
+| `auto_rebase` | Attempt to rebase the conflicting MR automatically |

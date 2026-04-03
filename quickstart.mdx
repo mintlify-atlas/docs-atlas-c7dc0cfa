@@ -1,80 +1,177 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick start"
+description: "Get from zero to running your first AI agent in under 5 minutes"
 ---
 
-## Get started in three steps
+This guide walks you through installing Gas Town, creating a workspace, adding a project, and running your first AI agent.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before starting, ensure you have:
+- **Go 1.25+** — [go.dev/dl](https://go.dev/dl/)
+- **Git 2.25+**
+- **Dolt 1.82.4+** — [dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation)
+- **Beads (bd) 0.55.4+**
+- **tmux 3.0+** (recommended)
+- An AI coding agent CLI (Claude Code, Codex, Copilot, etc.)
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+See [Installation](/installation) for full setup instructions including installing each prerequisite.
 
-### Step 2: Deploy your changes
+## Run your first agent
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Steps>
+  <Step title="Install Gas Town">
+    <CodeGroup>
+    ```bash Homebrew
+    brew install gastown
+    ```
+    ```bash npm
+    npm install -g @gastown/gt
+    ```
+    ```bash Go install
+    go install github.com/steveyegge/gastown/cmd/gt@latest
+    # Add to PATH if needed:
+    export PATH="$PATH:$HOME/go/bin"
+    ```
+    </CodeGroup>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    Also install Beads:
+    ```bash
+    go install github.com/steveyegge/beads/cmd/bd@latest
+    ```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    Verify both tools are installed:
+    ```bash
+    gt version
+    bd version
+    ```
+  </Step>
 
-### Step 3: Go live
+  <Step title="Create your workspace">
+    ```bash
+    gt install ~/gt --git
+    cd ~/gt
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    This creates your Gas Town workspace (called a **Town**) at `~/gt/` with git initialized.
+
+    Then start all services:
+    ```bash
+    gt up
+    ```
+
+    Run a health check to verify everything is working:
+    ```bash
+    gt doctor
+    ```
+  </Step>
+
+  <Step title="Add a project">
+    ```bash
+    gt rig add myproject https://github.com/you/repo.git
+    ```
+
+    This creates a **Rig** — a project container that clones your repo and sets up agent workspaces. Replace the URL with your actual repository.
+
+    <Tip>
+      Each rig gets its own issue tracking (Beads), merge queue (Refinery), and agent monitor (Witness).
+    </Tip>
+  </Step>
+
+  <Step title="Configure your agents">
+    Check which AI agents are available:
+    ```bash
+    gt config agent list
+    ```
+
+    Gas Town ships with built-in support for `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`, and more.
+
+    Set your preferred default:
+    ```bash
+    gt config default-agent claude
+    ```
+  </Step>
+
+  <Step title="Start the Mayor">
+    The Mayor is your primary AI coordinator — it has full context about your workspace and manages agents on your behalf.
+
+    ```bash
+    gt mayor attach
+    ```
+
+    This opens a tmux session with your Mayor agent. Tell it what you want to build:
+
+    ```
+    Build a REST API endpoint for user authentication with JWT tokens.
+    Create the necessary beads and assign them to agents.
+    ```
+
+    The Mayor will:
+    - Break your goal into trackable work items (beads)
+    - Create a convoy to group related tasks
+    - Spawn polecat worker agents
+    - Monitor progress and report back
+  </Step>
+</Steps>
+
+## What just happened?
+
+When you tell the Mayor what to build, Gas Town's orchestration layer kicks in:
+
+1. **Mayor creates beads** — atomic work items in the Beads issue tracker
+2. **Mayor creates a convoy** — groups related beads into a tracked delivery unit
+3. **Mayor slingswork** — assigns beads to polecat worker agents via their Hooks
+4. **Polecats execute** — each agent works in its own git worktree with persistent state
+5. **Refinery merges** — completed work flows through the merge queue to main
+6. **Mayor reports** — summarizes what was done and what's next
+
+If an agent crashes or loses context, its work state is preserved in the git-backed Hook — it picks up exactly where it left off.
+
+## Manual workflow (no Mayor)
+
+For simpler tasks or when you want direct control:
+
+```bash
+# Create an issue in Beads
+bd create --title="Fix auth bug" --type=bug --priority=1
+
+# Create a convoy to track it
+gt convoy create "Auth fixes" <bead-id>
+
+# Assign to an agent
+gt sling <bead-id> myproject
+
+# Check progress
+gt convoy list
+gt agents
+```
+
+## Monitor your agents
+
+```bash
+# Real-time TUI activity feed
+gt feed
+
+# Web dashboard (default port 8080)
+gt dashboard --open
+
+# Check agent health
+gt doctor
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Mayor workflow" icon="hat-wizard" href="/guides/mayor-workflow">
+    Learn how to use the Mayor for complex multi-agent coordination
+  </Card>
+  <Card title="Convoy workflow" icon="truck" href="/guides/convoy-workflow">
+    Manage work distribution with Convoys directly
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts/architecture">
+    Understand the Gas Town architecture in depth
+  </Card>
+  <Card title="Command reference" icon="terminal" href="/reference/workspace-commands">
+    Full reference for every `gt` and `bd` command
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

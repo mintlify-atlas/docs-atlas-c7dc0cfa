@@ -1,0 +1,235 @@
+---
+title: "Agents and roles"
+description: "The agents that run Gas Town, their responsibilities, scope, and how they coordinate through the MEOW pattern."
+---
+
+Gas Town has two tiers of agents: **town-level** agents that work across all projects, and **rig-level** agents that work within a single project repository. Every agent has a persistent identity stored as a bead, a defined scope, and a specific role in the orchestration chain.
+
+## Town-level agents
+
+Town-level agents operate from `~/gt/` and have visibility across all rigs. Their bead IDs use the `hq-` prefix.
+
+| Agent | Bead ID | Role | Persistence |
+|-------|---------|------|-------------|
+| **Mayor** | `hq-mayor` | Global coordinator; initiates convoys, routes work, notifies users | Persistent |
+| **Deacon** | `hq-deacon` | Daemon beacon; runs patrol cycles, monitors health, dispatches Dogs | Persistent |
+| **Boot** | `hq-boot` | Deacon watchdog; spawned by the daemon when the Deacon is unresponsive | Ephemeral |
+| **Dogs** | `hq-dog-<name>` | Long-running maintenance workers; handle cleanup, triage, and cross-rig batch tasks | Variable |
+
+<AccordionGroup>
+  <Accordion title="Mayor">
+    The Mayor is your primary interface. It is a persistent AI coordinator with full context about your workspace, all rigs, active convoys, and agent status.
+
+    The Mayor's responsibilities:
+    - Break down goals into beads and assemble them into convoys
+    - Dispatch work to rigs via `gt sling`
+    - Monitor progress and summarize results
+    - Handle escalations that individual rigs cannot resolve
+    - Notify you of important events
+
+    Start a Mayor session with `gt mayor attach`. The Mayor session persists across your work — you return to it to give new instructions and review completed work.
+
+    ```bash
+    gt mayor attach             # Attach to the persistent Mayor session
+    gt mayor start --agent auggie  # Start Mayor with a specific agent runtime
+    ```
+  </Accordion>
+
+  <Accordion title="Deacon">
+    The Deacon runs continuous patrol cycles across all rigs. It is the system's cross-rig watchdog.
+
+    The Deacon's responsibilities:
+    - Check agent health across all rigs on every cycle
+    - Dispatch Dogs for maintenance tasks (cleanup, triage, health checks)
+    - Escalate issues that individual Witnesses cannot resolve
+    - Receive heartbeats from the daemon every 3 minutes
+
+    The Deacon does not implement work directly — it delegates to Dogs and escalates to the Mayor. Think of it as the operations manager, not the worker.
+  </Accordion>
+
+  <Accordion title="Boot">
+    Boot is a special Dog that watches the Deacon itself. The daemon spawns Boot every 5 minutes to check whether the Deacon is still running and responsive. If the Deacon is down, Boot performs intelligent triage until the Deacon recovers.
+
+    This creates a chain of accountability:
+
+    ```
+    Daemon (Go process) ← heartbeat every 3 min
+        └── Boot (AI agent) ← intelligent triage
+            └── Deacon (AI agent) ← continuous patrol
+                └── Witnesses & Refineries ← per-rig agents
+    ```
+  </Accordion>
+
+  <Accordion title="Dogs">
+    Dogs are ephemeral-to-variable workers dispatched by the Deacon for background maintenance tasks. Each Dog runs in its own directory under `~/gt/deacon/dogs/<name>/`.
+
+    Common Dog tasks:
+    - Cleaning up stale beads (the Reaper)
+    - Compacting Dolt commit history (the Compactor)
+    - Running `gt doctor` checks
+    - Performing cross-rig batch operations
+
+    Dogs are not spawned by users directly. They are dispatched programmatically by the Deacon when patrol cycles detect work to do.
+  </Accordion>
+</AccordionGroup>
+
+## Rig-level agents
+
+Rig-level agents operate within a single rig. Their bead IDs use the rig's prefix (e.g. `gt-gastown-witness` for a rig named `gastown`).
+
+| Agent | Bead ID format | Role | Persistence |
+|-------|---------------|------|-------------|
+| **Witness** | `<prefix>-<rig>-witness` | Monitors polecat health, triggers recovery, manages session cleanup | Persistent |
+| **Refinery** | `<prefix>-<rig>-refinery` | Processes the merge queue, runs verification gates, merges to main | Persistent |
+| **Polecats** | `<prefix>-<rig>-polecat-<name>` | Worker agents; assigned specific issues, work in git worktrees | Persistent identity, ephemeral sessions |
+| **Crew** | `<prefix>-<rig>-crew-<name>` | Human workspaces; full git clones with user-managed lifecycle | Persistent |
+
+<AccordionGroup>
+  <Accordion title="Witness">
+    Each rig has exactly one Witness. It is the per-rig operations manager for polecats.
+
+    The Witness monitors but does **not** gate completion. Polecats manage their own lifecycle end-to-end. This prevents the Witness from becoming a bottleneck.
+
+    The Witness **does**:
+    - Detect stalled polecats (session stopped, hook still set)
+    - Nudge or respawn crashed sessions
+    - Clean up zombie polecats (completed work but failed to exit)
+    - Escalate unresolvable issues to the Deacon
+
+    The Witness **does not**:
+    - Force session cycles
+    - Interrupt a polecat mid-step
+    - Destroy sandboxes after completion
+    - Process polecat completion (that is the polecat's own job)
+  </Accordion>
+
+  <Accordion title="Refinery">
+    The Refinery runs the rig's merge queue. It lives in a git worktree at `<rig>/refinery/rig/` branched from `mayor/rig`.
+
+    When a polecat calls `gt done`, it pushes a branch and creates an MR bead. The Refinery:
+    1. Picks up pending MR beads
+    2. Batches them into a stack rebased on `main`
+    3. Runs verification gates (tests, lint) on the tip of the stack
+    4. Fast-forward merges all MRs if the tip passes
+    5. Binary bisects to find the culprit if the tip fails
+
+    This is a Bors-style merge queue. Polecats never push directly to `main`.
+  </Accordion>
+
+  <Accordion title="Polecats">
+    Polecats are worker agents with **persistent identity** but **ephemeral sessions**. They are the engine of Gas Town — they do the actual implementation work.
+
+    A polecat has three distinct layers:
+
+    | Layer | Component | Lifecycle |
+    |-------|-----------|-----------|
+    | **Identity** | Agent bead, CV chain, work history | Permanent — never deleted |
+    | **Sandbox** | Git worktree, branch | Persistent across assignments — reused by `gt sling` |
+    | **Session** | AI agent context window | Ephemeral — cycles on handoff, compaction, or crash |
+
+    Session cycling is **normal operation**, not failure. When a session ends via `gt handoff`, the same polecat continues in a new session — its sandbox and hook persist.
+
+    Polecats are named from a pool (Toast, Shadow, Copper, Ash, Storm, ...). A name maps to a worktree path (`polecats/Toast/`) and tmux session. Idle polecats are reused by the next `gt sling` rather than destroyed and recreated.
+
+    See [Work tracking](/concepts/work-tracking) for how work is assigned to polecats via hooks and convoys.
+  </Accordion>
+
+  <Accordion title="Crew">
+    Crew workspaces are full git clones for human developers. Unlike polecats (worktrees), crew workspaces are independent repos with their own remotes and full history.
+
+    Create a crew workspace:
+
+    ```bash
+    gt crew add yourname --rig myproject
+    cd myproject/crew/yourname
+    ```
+
+    Crew members can interact with other agents using `gt nudge` and `gt mail`, participate in convoys, and run `gt` commands from their workspace. The Mayor is also technically a crew member at the town level.
+  </Accordion>
+</AccordionGroup>
+
+## MEOW: Mayor-Enhanced Orchestration Workflow
+
+MEOW is the recommended pattern for coordinating multi-agent work. Rather than manually creating beads, slinging work, and tracking progress yourself, you describe your goal to the Mayor and let it orchestrate.
+
+<Steps>
+  <Step title="Tell the Mayor">
+    Start a Mayor session and describe what you want to build in plain language.
+
+    ```bash
+    gt mayor attach
+    # In Mayor session:
+    # "Build an auth system with JWT tokens and refresh logic"
+    ```
+  </Step>
+  <Step title="Mayor analyzes and decomposes">
+    The Mayor breaks the goal into atomic beads — bugs, tasks, features — each with a clear description and priority.
+  </Step>
+  <Step title="Convoy creation">
+    The Mayor assembles the beads into a convoy and creates it:
+
+    ```bash
+    gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify
+    ```
+  </Step>
+  <Step title="Agent spawning and work distribution">
+    The Mayor slings beads to polecats and crew members as capacity allows. Each assignment puts the bead on the agent's hook.
+
+    ```bash
+    gt sling gt-x7k2m myproject
+    ```
+  </Step>
+  <Step title="Progress monitoring">
+    Track the convoy from the Mayor session or command line:
+
+    ```bash
+    gt convoy list
+    gt convoy show
+    ```
+  </Step>
+  <Step title="Completion">
+    As polecats finish work and the Refinery merges branches, the convoy progresses. The Mayor summarizes results and notifies you.
+  </Step>
+</Steps>
+
+## GUPP: Gas Town Universal Propulsion Principle
+
+> **"If there is work on your Hook, YOU MUST RUN IT."**
+
+GUPP is the behavioral contract every Gas Town agent follows. When an agent starts a session and finds work on its hook, it executes immediately — no polling, no waiting for confirmation, no announcements.
+
+This is not a preference. It is the mechanism that makes the system work. Every agent that waits instead of executing stalls the engine.
+
+**Startup behavior for agents:**
+
+1. Check hook (`gt hook`)
+2. Work found → execute immediately
+3. Hook empty → check mail for attached work
+4. Nothing found → escalate to Witness
+
+<Warning>
+The failure mode GUPP prevents: an agent restarts, announces itself, waits for confirmation, the Witness assumes work is progressing, nothing happens, Gas Town stalls. Don't announce — execute.
+</Warning>
+
+## NDI: Nondeterministic Idempotence
+
+NDI is the system-level guarantee that underlies GUPP: Gas Town produces useful outcomes even when individual agents fail, produce varying results, or need to be restarted.
+
+Persistent beads, git-backed hooks, and the Witness/Deacon oversight chain combine to ensure workflows eventually complete even when individual operations fail. An agent can crash mid-step, restart, and pick up exactly where it left off because:
+
+- The hook persists across sessions
+- The polecat's sandbox (worktree) persists through session cycling
+- Molecule step state is stored in beads, not in agent memory
+- The Witness detects stalls and triggers recovery
+
+## Agent identity
+
+Every agent has three environment variables that establish its identity within Gas Town:
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `BD_ACTOR` | `gastown/polecats/Toast` | Full path identity used for bead attribution |
+| `GT_ROLE` | `polecat` | The agent's role (mayor, deacon, witness, refinery, polecat, crew) |
+| `GT_RIG` | `gastown` | The rig this agent belongs to (empty for town-level agents) |
+
+These are injected by `gt prime` at session start and used by `bd` commands for attribution, routing, and permission checking. An agent's `BD_ACTOR` is what appears in bead history and the CV chain.

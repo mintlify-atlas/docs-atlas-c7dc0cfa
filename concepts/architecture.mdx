@@ -1,0 +1,202 @@
+---
+title: "Architecture"
+description: "How Gas Town organizes workspaces, stores data, and routes work across agents and projects."
+---
+
+Gas Town uses a two-level hierarchy — **Town** and **Rig** — to separate cross-project coordination from per-project implementation work. Every agent, every issue, and every piece of data has a well-defined home in this hierarchy.
+
+## Two-level beads architecture
+
+Gas Town stores work-tracking data (beads) at two levels. The level determines the prefix on every bead ID, which agent owns it, and how the system routes `bd` commands to the right database.
+
+| Level | Location | Bead prefix | Purpose |
+|-------|----------|-------------|---------|
+| **Town** | `~/gt/.beads/` | `hq-*` | Cross-rig coordination, Mayor mail, convoy tracking, agent identity |
+| **Rig** | `<rig>/mayor/rig/.beads/` | project prefix (e.g. `gt-*`) | Implementation work, merge requests, project issues |
+
+**Town-level beads** hold everything that spans projects: convoy definitions, strategic decisions, Mayor and Deacon state, and global role templates.
+
+**Rig-level beads** hold everything tied to a single repository: bugs, features, tasks, merge requests, and the agent beads for Witness, Refinery, and Polecats operating in that rig.
+
+## Directory structure
+
+```
+~/gt/                           Town root
+├── .beads/                     Town-level beads (hq-* prefix)
+│   ├── metadata.json           Beads config (dolt_mode, dolt_database)
+│   └── routes.jsonl            Prefix → rig routing table
+├── .dolt-data/                 Centralized Dolt data directory
+│   ├── hq/                     Town beads database (hq-* prefix)
+│   ├── gastown/                Gastown rig database (gt-* prefix)
+│   ├── beads/                  Beads rig database (bd-* prefix)
+│   └── <other rigs>/           Per-rig databases
+├── daemon/                     Daemon runtime state
+│   ├── dolt-state.json         Dolt server state (pid, port, databases)
+│   ├── dolt-server.log         Server log
+│   └── dolt.pid                Server PID file
+├── deacon/                     Deacon workspace
+│   └── dogs/<name>/            Dog worker directories
+├── mayor/                      Mayor agent home
+│   ├── town.json               Town configuration
+│   ├── rigs.json               Rig registry
+│   ├── daemon.json             Daemon patrol config
+│   └── accounts.json           Claude Code account management
+├── settings/                   Town-level settings
+│   ├── config.json             Town settings (agents, themes)
+│   └── escalation.json         Escalation routes and contacts
+├── directives/                 Town-level role directives
+│   └── <role>.md               Markdown injected at prime time
+├── formula-overlays/           Town-level formula overlays
+│   └── <formula>.toml          TOML step overrides (replace/append/skip)
+└── <rig>/                      Project container (not a git clone)
+    ├── config.json             Rig identity and beads prefix
+    ├── directives/             Rig-level role directives (overrides town)
+    │   └── <role>.md
+    ├── formula-overlays/       Rig-level formula overlays
+    │   └── <formula>.toml
+    ├── mayor/rig/              Canonical clone (beads live here)
+    │   └── .beads/             Rig-level beads (redirected to Dolt)
+    ├── refinery/               Refinery agent home
+    │   └── rig/                Worktree from mayor/rig
+    ├── witness/                Witness agent home (no clone)
+    ├── crew/                   Crew parent
+    │   └── <name>/             Human workspaces (full git clones)
+    └── polecats/               Polecats parent
+        └── <name>/<rigname>/   Worker worktrees from mayor/rig
+```
+
+<Note>
+There is no per-directory `CLAUDE.md` or `AGENTS.md` inside `~/gt/`. Only the town-root `~/gt/CLAUDE.md` exists on disk. Full agent context is injected by `gt prime` via the `sessionStart` hook.
+</Note>
+
+## Worktree architecture
+
+Polecats and the Refinery are git **worktrees**, not full clones. This enables fast spawning and shared object storage. All worktrees branch from `mayor/rig`, the canonical clone that also hosts the rig's beads database.
+
+```
+mayor/rig/              ← canonical clone, source of truth
+├── .beads/             ← single beads database for the entire rig
+polecats/Toast/rig/     ← worktree branched from mayor/rig
+refinery/rig/           ← worktree branched from mayor/rig
+```
+
+Spawning a polecat creates a branch on an existing worktree — a branch operation, not a full clone. This avoids the ~5 second overhead of `git worktree add` on every assignment:
+
+```bash
+# On first sling: branch operation on the existing worktree
+git checkout -b polecat/Toast/gt-abc12@1712345678
+
+# On reuse (idle polecat gets a new assignment):
+git checkout main
+git pull origin main
+git checkout -b polecat/Toast/gt-def34@1712346000
+```
+
+**Crew workspaces** (`crew/<name>/`) are full git clones. Human developers need independent repos with full git history and remote management — worktree sharing does not suit interactive development.
+
+| Workspace type | Implementation | Rationale |
+|----------------|---------------|-----------|
+| Polecats | Git worktree | Fast spawn, shared object store, ephemeral sessions |
+| Refinery | Git worktree | Same repository, shared commit history |
+| Crew | Full git clone | Independent remotes, human-managed lifecycle |
+
+## Storage layer: Dolt SQL server
+
+All beads data is stored in a **single Dolt SQL Server process per town**. There is no embedded fallback — if the server is down, `bd` fails fast with an error pointing to `gt dolt start`.
+
+```
+┌─────────────────────────────────┐
+│  Dolt SQL Server (per town)     │
+│  Port 3307, managed by daemon   │
+│  Data: ~/gt/.dolt-data/         │
+└──────────┬──────────────────────┘
+           │ MySQL protocol
+    ┌──────┼──────┬──────────┐
+    │      │      │          │
+  USE hq  USE gastown  USE beads  ...
+```
+
+Each rig gets its own database under `.dolt-data/`. The daemon monitors the server on every heartbeat and auto-restarts it on crash.
+
+All agents write directly to `main` using transaction discipline (`BEGIN` / `DOLT_COMMIT` / `COMMIT` atomically). This eliminates branch proliferation and ensures immediate cross-agent visibility into work state.
+
+## Beads routing
+
+The `routes.jsonl` file maps bead ID prefixes to rig locations relative to the town root. Every `bd` command reads this file to find the right database.
+
+```jsonl
+{"prefix":"hq-","path":"."}
+{"prefix":"gt-","path":"gastown/mayor/rig"}
+{"prefix":"bd-","path":"beads/mayor/rig"}
+```
+
+Routes point to `mayor/rig` because that is where the canonical `.beads/` lives. This makes cross-rig bead operations transparent:
+
+```bash
+bd show hq-mayor      # Routes to ~/gt/.beads (town level)
+bd show gt-abc12      # Routes to gastown/mayor/rig/.beads (rig level)
+```
+
+### Beads redirects
+
+Worktrees (polecats, refinery, crew) do not have their own beads databases. They use a `.beads/redirect` file that points to the canonical beads location:
+
+```
+polecats/alpha/.beads/redirect → ../../mayor/rig/.beads
+refinery/rig/.beads/redirect   → ../../mayor/rig/.beads
+```
+
+The resolver follows redirect chains up to a depth of 3 with circular detection. All agents in a rig share a single beads database through this mechanism.
+
+## Merge queue: batch-then-bisect
+
+The Refinery processes completed polecat work through a **batch-then-bisect** (Bors-style) merge queue. Polecats never push directly to `main`.
+
+```
+MRs waiting:  [A, B, C, D]
+                    ↓
+Batch:        Rebase A..D as a stack on main
+                    ↓
+Test tip:     Run verification gates on D (tip of stack)
+                    ↓
+If PASS:      Fast-forward merge all four → done
+If FAIL:      Binary bisect → test B (midpoint)
+                    ↓
+              If B passes: C or D is the culprit → bisect [C, D]
+              If B fails:  A or B is the culprit → bisect [A, B]
+```
+
+**Why this matters:** batching lets many polecats work in parallel and land work together. Bisecting isolates failures to a single MR without re-running the whole batch. Good MRs land quickly; bad ones are isolated and fixed or re-dispatched.
+
+The full queue lifecycle:
+
+1. Polecat runs `gt done` — branch pushed, MR bead created
+2. Refinery picks up pending MRs and batches them
+3. Verification gates run on the merged stack tip
+4. Green: all MRs in the batch fast-forward merge to `main`
+5. Red: binary bisect isolates the failing MR; good MRs merge, bad one is held
+
+<Tip>
+Verification gates (test command, lint, etc.) are configurable per rig. The batching strategy itself is not pluggable — it is a core guarantee of the system.
+</Tip>
+
+## Data plane lifecycle
+
+All beads data flows through a six-stage lifecycle. Stages 1–3 run today; stages 4–6 are automated by Dog workers:
+
+| Stage | Name | What happens |
+|-------|------|--------------|
+| 1 | **CREATE** | Bead written to Dolt, receives a `DOLT_COMMIT` |
+| 2 | **LIVE** | Active work; bead updated as work progresses |
+| 3 | **CLOSE** | Work complete; bead marked done |
+| 4 | **DECAY** | Old closed beads deleted (after 7–30 days) |
+| 5 | **COMPACT** | Dolt commit history rebased together |
+| 6 | **FLATTEN** | All history squashed to a single commit |
+
+```
+CREATE → LIVE → CLOSE → DECAY → COMPACT → FLATTEN
+  │        │       │        │        │          │
+  Dolt   active   done   DELETE   REBASE     SQUASH
+  commit  work    bead    rows    commits    all history
+                         >7-30d  together   to 1 commit
+```

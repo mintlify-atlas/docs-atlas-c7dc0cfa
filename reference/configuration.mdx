@@ -1,0 +1,304 @@
+---
+title: "Configuration"
+description: "Complete reference for Gas Town configuration files: town settings, rig config, theme, merge queue, runtime, directives, formula overlays, and branch naming templates."
+---
+
+Gas Town uses a layered configuration system. Settings cascade from system defaults up through town-level and rig-level files, with runtime and wisp layers for ephemeral overrides.
+
+## Town settings (`~/gt/settings/config.json`)
+
+The town settings file controls the default agent, custom agent definitions, and per-role agent assignments for all rigs.
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "claude",
+  "agents": {
+    "claude-haiku": {
+      "command": "claude",
+      "args": ["--model", "haiku", "--dangerously-skip-permissions"]
+    }
+  },
+  "role_agents": {
+    "witness": "claude-haiku",
+    "polecat": "claude-haiku"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `string` | Must be `"town-settings"` |
+| `version` | `int` | Schema version. Must be `1` |
+| `default_agent` | `string` | Agent preset used when no rig or role override is set |
+| `agents` | `map[string]object` | Custom agent definitions keyed by name (see [Agent presets](/reference/agent-presets)) |
+| `role_agents` | `map[string]string` | Agent name to use for a specific role across all rigs |
+
+<Note>
+`role_agents` keys are role names: `mayor`, `deacon`, `witness`, `refinery`, `polecat`, `crew`.
+</Note>
+
+---
+
+## Rig config (`<rig>/config.json`)
+
+Defines a rig's identity. This file is created by `gt rig add` and rarely needs manual editing.
+
+```json
+{
+  "type": "rig",
+  "name": "myproject",
+  "git_url": "https://github.com/you/repo.git",
+  "default_branch": "main",
+  "beads": { "prefix": "mp" }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | `string` | — | Must be `"rig"` |
+| `name` | `string` | — | Rig identifier used in commands and paths |
+| `git_url` | `string` | — | Remote URL that was cloned |
+| `default_branch` | `string` | `"main"` | Merge target for the Refinery and base for polecat worktrees when no integration branch is active. Auto-detected from the remote during `gt rig add`. |
+| `beads.prefix` | `string` | — | Short prefix for bead IDs in this rig (e.g., `"mp"` produces `mp-abc12` IDs) |
+
+---
+
+## Rig settings (`<rig>/settings/config.json`)
+
+Per-rig overrides for theme, merge queue, agent selection, and runtime.
+
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "agent": "opencode",
+  "theme": {
+    "disabled": false,
+    "name": "forest",
+    "custom": {
+      "bg": "#111111",
+      "fg": "#eeeeee"
+    },
+    "role_themes": {
+      "witness": "rust",
+      "refinery": "plum",
+      "crew": "none"
+    }
+  },
+  "merge_queue": {
+    "enabled": true,
+    "run_tests": true,
+    "setup_command": "pnpm install",
+    "typecheck_command": "tsc --noEmit",
+    "lint_command": "eslint .",
+    "test_command": "pnpm test",
+    "build_command": "pnpm build",
+    "on_conflict": "assign_back",
+    "delete_merged_branches": true,
+    "retry_flaky_tests": 1,
+    "poll_interval": "30s",
+    "max_concurrent": 1,
+    "integration_branch_polecat_enabled": true,
+    "integration_branch_refinery_enabled": true,
+    "integration_branch_template": "integration/{title}",
+    "integration_branch_auto_land": false
+  }
+}
+```
+
+### Theme fields
+
+Controls tmux status bar and window colors for the rig and its role sessions.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `disabled` | `bool` | `false` | Disable all tmux status/window theming for this rig |
+| `name` | `string` | auto-assigned | Use a named built-in palette theme (e.g., `"forest"`, `"rust"`, `"plum"`) |
+| `custom.bg` | `string` | unset | Custom tmux background color (hex or color name) |
+| `custom.fg` | `string` | unset | Custom tmux foreground color |
+| `role_themes` | `map[string]string` | unset | Per-role overrides for `witness`, `refinery`, `crew`, `polecat`. Use `"none"` to disable theming for a role |
+
+**Theme resolution order:**
+
+1. No `theme` config → auto-assign a built-in palette by rig name
+2. `disabled: true` → skip both `status-style` and `window-style`
+3. `name` set → use that built-in theme
+4. `custom` set → use the exact `{bg, fg}` colors
+5. `role_themes` → override role-specific sessions within the rig
+
+Town-level role defaults live in `mayor/config.json` under a `theme.role_defaults` map, which supports `mayor`, `deacon`, `witness`, `refinery`, `crew`, and `polecat`.
+
+### Merge queue fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `true` | Whether the merge queue is active |
+| `run_tests` | `bool` | `true` | Run tests before merging |
+| `setup_command` | `string` | `""` | Setup/install command run before tests (e.g., `pnpm install`) |
+| `typecheck_command` | `string` | `""` | Type check command (e.g., `tsc --noEmit`). Empty = skip. |
+| `lint_command` | `string` | `""` | Lint command (e.g., `eslint .`). Empty = skip. |
+| `test_command` | `string` | `""` | Test command. Empty = skip. |
+| `build_command` | `string` | `""` | Build command (e.g., `go build ./...`). Empty = skip. |
+| `on_conflict` | `string` | `"assign_back"` | Conflict strategy: `"assign_back"` returns the MR to the polecat, `"auto_rebase"` rebases automatically |
+| `delete_merged_branches` | `bool` | `true` | Delete source branches after merging |
+| `retry_flaky_tests` | `int` | `1` | Number of times to retry a failing test run before marking flaky |
+| `poll_interval` | `string` | `"30s"` | How often the Refinery polls for new merge requests |
+| `max_concurrent` | `int` | `1` | Maximum number of merges the Refinery processes simultaneously |
+| `integration_branch_polecat_enabled` | `*bool` | `true` | Polecats automatically source their worktrees from integration branches when one exists for their issue |
+| `integration_branch_refinery_enabled` | `*bool` | `true` | `gt done` / `gt mq submit` automatically target the integration branch instead of `default_branch` |
+| `integration_branch_template` | `string` | `"integration/{title}"` | Branch name template. Supports `{title}`, `{epic}`, `{prefix}`, `{user}` |
+| `integration_branch_auto_land` | `*bool` | `false` | Refinery patrol automatically lands an integration branch when all its child issues are closed |
+
+---
+
+## Runtime configuration
+
+The `runtime` field in rig settings configures the AI runtime for the rig. This is a legacy compatibility path — the recommended approach is agent presets (see [Agent presets](/reference/agent-presets)).
+
+```json
+{
+  "runtime": {
+    "provider": "codex",
+    "command": "codex",
+    "args": [],
+    "prompt_mode": "none"
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `provider` | `string` | Agent type identifier (e.g., `"codex"`, `"claude"`, `"opencode"`) |
+| `command` | `string` | Binary to invoke |
+| `args` | `string[]` | Arguments passed to the binary on startup |
+| `prompt_mode` | `string` | `"arg"` (prompt as CLI arg) or `"none"` (no prompt support) |
+
+<Note>
+`RuntimeConfig` works but misses features available through `AgentPresetInfo`, including session resume, process detection, and non-interactive mode. Use agent presets for new configurations.
+</Note>
+
+---
+
+## Role directives
+
+Role directives are markdown files that inject persistent instructions into an agent's context. They are read by `gt prime` and delivered to agents on session start.
+
+**Town-level directives** (apply to all rigs):
+
+```
+~/gt/directives/<role>.md
+```
+
+**Rig-level directives** (apply to one rig only):
+
+```
+~/gt/<rig>/directives/<role>.md
+```
+
+Replace `<role>` with a role name: `mayor`, `deacon`, `witness`, `refinery`, `polecat`, `crew`.
+
+**Example:** Add a custom instruction to all polecats in a rig:
+
+```bash
+mkdir -p ~/gt/myproject/directives
+cat > ~/gt/myproject/directives/polecat.md << 'EOF'
+## Project conventions
+
+- All new files must include a copyright header.
+- Run `pnpm lint --fix` before submitting.
+EOF
+```
+
+---
+
+## Formula overlays
+
+Formula overlays let you customize how a formula executes by adding, replacing, or skipping individual steps. Create a TOML file alongside your formula with step overrides.
+
+```toml
+# Override a step in the "release" formula
+[[steps]]
+id = "run-tests"
+mode = "replace"
+title = "Run tests (custom)"
+description = "Run make test-ci instead of make test"
+
+# Skip a step entirely
+[[steps]]
+id = "publish"
+mode = "skip"
+
+# Append a new step after an existing one
+[[steps]]
+id = "notify-slack"
+mode = "append"
+after = "create-tag"
+title = "Notify Slack"
+description = "Run ./scripts/notify-release.sh {{version}}"
+```
+
+**Overlay modes:**
+
+| Mode | Description |
+|------|-------------|
+| `replace` | Replaces the step's `title` and `description` with the overlay values |
+| `skip` | Removes the step from the executed sequence |
+| `append` | Inserts a new step after the step named in `after` |
+
+---
+
+## Polecat branch naming templates
+
+Configure the git branch name that polecats create for their worktrees. Set via a wisp (transient) or via a rig identity bead label (persistent).
+
+```bash
+# Transient — for testing
+echo '{"polecat_branch_template": "adam/{year}/{month}/{description}"}' > \
+  ~/gt/.beads-wisp/config/myrig.json
+
+# Persistent — via rig identity bead labels
+bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{description}"
+```
+
+**Template variables:**
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{user}` | From `git config user.name` | `adam` |
+| `{year}` | Current year (YY format) | `26` |
+| `{month}` | Current month (MM format) | `01` |
+| `{name}` | Polecat worker name | `alpha` |
+| `{issue}` | Issue ID without prefix | `123` (from `gt-123`) |
+| `{description}` | Sanitized issue title | `fix-auth-bug` |
+| `{timestamp}` | Unique base-36 timestamp | `1ks7f9a` |
+
+**Default behavior (when template is empty or unset):**
+
+- With issue: `polecat/{name}/{issue}@{timestamp}`
+- Without issue: `polecat/{name}-{timestamp}`
+
+**Example templates:**
+
+```bash
+# GitHub enterprise format
+"adam/{year}/{month}/{description}"
+
+# Simple feature branches
+"feature/{issue}"
+
+# Include polecat name for multi-developer teams
+"work/{name}/{issue}"
+```
+
+---
+
+## Configuration layering
+
+Rig-level configuration is resolved in this order (highest to lowest priority):
+
+1. **Wisp layer** (`.beads-wisp/config/`) — transient, local overrides
+2. **Rig identity bead labels** — persistent rig settings stored in beads
+3. **Town defaults** (`~/gt/settings/config.json`)
+4. **System defaults** — compiled-in fallbacks

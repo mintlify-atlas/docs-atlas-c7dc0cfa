@@ -1,0 +1,265 @@
+---
+title: "Installation"
+description: "Install Gas Town and set up your first workspace."
+---
+
+## Prerequisites
+
+### Required
+
+| Tool | Version | Check command | Install |
+|------|---------|--------------|---------|
+| **Go** | 1.24+ | `go version` | [go.dev/doc/install](https://go.dev/doc/install) |
+| **Git** | 2.20+ | `git --version` | [git-scm.com](https://git-scm.com/downloads) |
+| **Dolt** | 1.82.4+ | `dolt version` | [github.com/dolthub/dolt](https://github.com/dolthub/dolt?tab=readme-ov-file#installation) |
+| **Beads (`bd`)** | 0.55.4+ | `bd version` | `go install github.com/steveyegge/beads/cmd/bd@latest` |
+
+### Optional (full stack mode)
+
+| Tool | Version | Check command | Install |
+|------|---------|--------------|---------|
+| **tmux** | 3.0+ | `tmux -V` | See below |
+| **Claude Code** (default runtime) | latest | `claude --version` | [claude.ai/claude-code](https://claude.ai/claude-code) |
+| **Codex CLI** | latest | `codex --version` | [developers.openai.com/codex/cli](https://developers.openai.com/codex/cli) |
+| **OpenCode CLI** | latest | `opencode --version` | [opencode.ai](https://opencode.ai) |
+| **GitHub Copilot CLI** | latest | `copilot --version` | [cli.github.com](https://cli.github.com) (requires Copilot seat) |
+
+<Note>
+`tmux` is required for full stack mode, where agents run in managed sessions with automatic lifecycle handling. In minimal mode you can run agents manually without it.
+</Note>
+
+## Install prerequisites
+
+<CodeGroup>
+
+```bash macOS
+# Install Homebrew if needed
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Required
+brew install go git
+
+# Optional (full stack mode)
+brew install tmux
+
+# Install Dolt — see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
+```
+
+```bash Debian/Ubuntu
+# Required
+sudo apt update
+sudo apt install -y git
+
+# Install Go (the apt package may be outdated; use the official installer)
+wget https://go.dev/dl/go1.24.12.linux-amd64.tar.gz
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf go1.24.12.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Optional (full stack mode)
+sudo apt install -y tmux
+
+# Install Dolt — see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
+```
+
+```bash Fedora/RHEL
+# Required
+sudo dnf install -y git golang
+
+# Optional (full stack mode)
+sudo dnf install -y tmux
+
+# Install Dolt — see https://github.com/dolthub/dolt?tab=readme-ov-file#installation
+```
+
+</CodeGroup>
+
+## Install Gas Town
+
+<CodeGroup>
+
+```bash Homebrew
+brew install gastown
+```
+
+```bash npm
+npm install -g @gastown/gt
+```
+
+```bash go install
+go install github.com/steveyegge/gastown/cmd/gt@latest
+```
+
+```bash Build from source (Windows / fallback)
+git clone https://github.com/steveyegge/gastown.git
+cd gastown
+go build -o gt.exe ./cmd/gt
+mv gt.exe $HOME/go/bin/
+```
+
+</CodeGroup>
+
+Also install the Beads CLI, which Gas Town uses for work tracking:
+
+```bash
+go install github.com/steveyegge/beads/cmd/bd@latest
+```
+
+## Configure your shell PATH
+
+If you installed via `go install`, make sure your Go bin directory is on `PATH`. Add this to `~/.zshrc`, `~/.bashrc`, or equivalent:
+
+```bash
+export PATH="$PATH:$HOME/go/bin"
+```
+
+Then reload your shell:
+
+```bash
+source ~/.zshrc   # or source ~/.bashrc
+```
+
+Verify both binaries are available:
+
+```bash
+gt version
+bd version
+```
+
+## Workspace setup
+
+<Steps>
+  <Step title="Create your workspace">
+    Initialize a Gas Town workspace (called the Town) at `~/gt`:
+
+    ```bash
+    gt install ~/gt --shell
+    cd ~/gt
+    ```
+
+    This creates:
+
+    ```
+    ~/gt/
+    ├── CLAUDE.md       # Identity anchor — run `gt prime` to load context
+    ├── mayor/          # Mayor config and state
+    ├── rigs/           # Project containers (initially empty)
+    └── .beads/         # Town-level issue tracking
+    ```
+  </Step>
+
+  <Step title="Enable and initialize">
+    Enable Gas Town system-wide and initialize a git repository for your HQ:
+
+    ```bash
+    gt enable
+    gt git-init
+    ```
+  </Step>
+
+  <Step title="Add a project (rig)">
+    Add your first project by pointing Gas Town at a git repository:
+
+    ```bash
+    gt rig add myproject https://github.com/you/repo.git
+    ```
+
+    This clones the repository and creates:
+
+    ```
+    ~/gt/myproject/
+    ├── .beads/         # Project-level issue tracking
+    ├── mayor/rig/      # Mayor's canonical clone
+    ├── refinery/rig/   # Merge queue processor
+    ├── witness/        # Worker health monitor
+    └── polecats/       # Worker clones (created on demand)
+    ```
+  </Step>
+
+  <Step title="Start services">
+    Start all Gas Town services:
+
+    ```bash
+    gt up
+    ```
+
+    To stop services later, run `gt down` or `gt shutdown`.
+  </Step>
+
+  <Step title="Run a health check">
+    Verify your installation:
+
+    ```bash
+    gt doctor
+    gt status
+    ```
+
+    If `gt doctor` reports errors, run with `--fix` to auto-repair common issues:
+
+    ```bash
+    gt doctor --fix
+    ```
+
+    For more detail on any failures:
+
+    ```bash
+    gt doctor --verbose
+    ```
+  </Step>
+</Steps>
+
+## Configure agents (optional)
+
+Gas Town ships with built-in presets for `claude`, `gemini`, `codex`, `cursor`, `auggie`, `amp`, `opencode`, `copilot`, and others. You can also create custom aliases that encode model or flag preferences:
+
+```bash
+# List available agents
+gt config agent list
+
+# Create a custom alias
+gt config agent set codex-low "codex --thinking low"
+gt config agent set claude-haiku "claude --model haiku --dangerously-skip-permissions"
+
+# Set the town-wide default agent
+gt config default-agent codex-low
+```
+
+You can also override the agent per-command without changing defaults:
+
+```bash
+gt sling gt-abc12 myproject --agent claude-haiku
+```
+
+## Update Gas Town
+
+```bash
+go install github.com/steveyegge/gastown/cmd/gt@latest
+go install github.com/steveyegge/beads/cmd/bd@latest
+gt doctor --fix
+```
+
+## Uninstall
+
+```bash
+# Remove binaries
+rm $(which gt) $(which bd)
+
+# Remove workspace — CAUTION: this deletes all work
+rm -rf ~/gt
+```
+
+<Warning>
+`rm -rf ~/gt` permanently removes your workspace, all project clones, and all tracked work. Back up anything important before running this.
+</Warning>
+
+## Troubleshooting
+
+**`gt: command not found`** — Your Go bin directory is not on PATH. Add `export PATH="$PATH:$HOME/go/bin"` to your shell config and reload.
+
+**`bd: command not found`** — Install Beads: `go install github.com/steveyegge/beads/cmd/bd@latest`
+
+**Daemon not starting** — Verify tmux is installed and working: `tmux -V`
+
+**Git authentication errors** — Test SSH access with `ssh -T git@github.com`, or configure a credential helper: `git config --global credential.helper cache`
+
+**Beads database issues** — Run `bd status` and `bd doctor` from inside your rig's mayor directory: `cd ~/gt/myproject/mayor/rig`

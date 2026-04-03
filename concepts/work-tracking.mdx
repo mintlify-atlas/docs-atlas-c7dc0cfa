@@ -1,0 +1,231 @@
+---
+title: "Work tracking"
+description: "How Gas Town tracks work using Beads and Convoys — the atomic units of work and the batches that bundle them."
+---
+
+Gas Town tracks all work in **Beads** — git-backed atomic work items stored in a Dolt SQL database. Beads are grouped into **Convoys** for coordinated delivery across agents. The `bd` CLI manages beads directly; the `gt` CLI manages convoys and agent assignments.
+
+## Beads
+
+A bead is the fundamental unit of work in Gas Town. Every issue, task, bug, feature, merge request, and agent identity is stored as a bead. Beads live in a Dolt database and are committed to git, giving every change a permanent, attributable history.
+
+### Bead ID format
+
+Bead IDs use a **prefix + 5-character alphanumeric** format:
+
+```
+gt-abc12
+hq-x7k2m
+bd-p9n4q
+```
+
+The prefix identifies the rig (or town, for `hq-` beads). The 5-character suffix is a random alphanumeric string. The terms "bead" and "issue" are interchangeable — beads are the data format; issues are the work items stored as beads.
+
+### Bead types
+
+| Type | Use |
+|------|-----|
+| `task` | General work item |
+| `bug` | Defect to fix |
+| `feature` | New capability to build |
+| `epic` | Large scope item that groups related work |
+| `question` | Open question requiring a decision |
+| `docs` | Documentation work |
+
+### Priority system
+
+| Level | Label | Meaning |
+|-------|-------|---------|
+| `0` | P0 — Critical | Blocking everything; act immediately |
+| `1` | P1 — High | Urgent; address in current cycle |
+| `2` | P2 — Medium | Normal priority |
+| `3` | P3 — Low | Nice to have |
+| `4` | P4 — Backlog | Not scheduled |
+
+### Bead status lifecycle
+
+A bead moves through the following statuses:
+
+```
+open → in_progress → done
+            ↓
+         blocked (temporarily)
+```
+
+`bd ready` shows only beads with status `open` and no unresolved dependencies — the work that is safe to start right now.
+
+## Managing beads with `bd`
+
+The `bd` CLI is the primary interface for creating, viewing, and updating beads.
+
+### Common commands
+
+```bash
+# Find work to do
+bd ready                            # Unblocked beads ready to start
+bd list --status=open               # All open beads
+bd list --type=bug --priority=1     # P1 bugs
+
+# View a bead
+bd show gt-abc12                    # Full details with dependencies
+
+# Create a bead
+bd create --title="Fix login timeout" --type=bug --priority=1
+
+# Update a bead
+bd update gt-abc12 --status=in_progress
+bd update gt-abc12 --priority=2 --assignee="gastown/polecats/Toast"
+
+# Close a bead
+bd close gt-abc12                   # Mark complete
+bd close gt-abc12 gt-def34          # Close multiple at once
+
+# Dependencies
+bd dep add gt-abc12 gt-def34        # gt-abc12 depends on gt-def34
+
+# Sync to git
+bd sync                             # Commit bead changes to git
+```
+
+### Graph analysis with `bv`
+
+`bv` provides read-only graph analysis of your bead graph. Always use `--robot-*` flags to avoid launching the interactive TUI:
+
+```bash
+bv --robot-triage     # Ranked picks, quick wins, blockers, health
+bv --robot-next       # Single top pick plus claim command
+bv --robot-plan       # Parallel execution tracks
+bv --robot-alerts     # Stale issues, cascades, dependency mismatches
+bv --robot-insights   # Full graph metrics: PageRank, betweenness, cycles
+```
+
+<Warning>
+Never run bare `bv` — it launches an interactive TUI that blocks your terminal. Always pass a `--robot-*` flag.
+</Warning>
+
+## Convoys
+
+A convoy is the primary work-order unit. It bundles a set of related beads and tracks their collective progress. Convoys are how the Mayor organizes large goals into deliverable batches.
+
+### What convoys do
+
+- Group related beads under a named objective
+- Track completion percentage across all included beads
+- Notify you and other agents when all beads are done
+- Provide a single status view across multiple polecats working in parallel
+
+### Convoy lifecycle
+
+```
+open → in_progress → complete
+```
+
+A convoy transitions to `in_progress` when any of its beads are started. It reaches `complete` when all included beads are closed.
+
+Convoys labeled `mountain` get additional capabilities: autonomous stall detection and smart skip logic for managing epic-scale execution across many polecats.
+
+### Convoy commands
+
+```bash
+# Create a convoy
+gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify --human
+
+# List all convoys
+gt convoy list
+
+# View a specific convoy
+gt convoy show hq-cv-abc
+
+# Add beads to an existing convoy
+gt convoy add hq-cv-abc gt-m3k9p gt-w5t2x
+
+# Force refresh convoy state
+gt convoy refresh hq-cv-abc
+```
+
+The `--notify` flag sends a notification when the convoy completes. The `--human` flag marks the convoy as requiring human review before closing.
+
+### Example: full convoy workflow
+
+```bash
+# 1. Create beads for the work
+bd create --title="Add JWT token generation" --type=feature --priority=1
+bd create --title="Add refresh token logic" --type=feature --priority=1
+# → gt-abc12, gt-def34
+
+# 2. Create a convoy
+gt convoy create "Auth tokens" gt-abc12 gt-def34 --notify
+
+# 3. Sling work to agents
+gt sling gt-abc12 myproject
+gt sling gt-def34 myproject
+
+# 4. Track progress
+gt convoy list
+gt convoy show
+
+# 5. Monitor agent activity
+gt feed
+```
+
+## Merge requests
+
+When a polecat completes its assigned issue, it does not push directly to `main`. Instead, it creates a **merge request (MR bead)** and hands off to the Refinery.
+
+### How polecats submit work
+
+```bash
+# Inside a polecat session, after completing the issue:
+gt done
+```
+
+`gt done` performs the full submission sequence:
+
+1. Pushes the polecat's branch to the remote
+2. Creates an MR bead (`bd update --mr-ready`)
+3. Updates the issue bead status
+4. Clears the polecat's hook
+5. Sets agent state to `idle`
+6. Kills the session
+
+The polecat's sandbox (worktree) is preserved so the next `gt sling` can reuse it without creating a new worktree.
+
+### How the Refinery processes MRs
+
+The Refinery picks up pending MR beads and processes them through the batch-then-bisect merge queue:
+
+```
+MRs: [A, B, C, D]
+  → Rebase as stack on main
+  → Run verification gates on tip (D)
+  → PASS: fast-forward merge all four
+  → FAIL: binary bisect to isolate culprit
+```
+
+If a rebase conflict occurs, the Refinery creates a conflict-resolution task bead that can be assigned to an idle polecat.
+
+### MR bead format
+
+MR beads are regular beads with additional metadata:
+
+```bash
+bd show gt-abc12-mr      # Show MR bead with branch and gate status
+bd update gt-abc12 --mr-ready   # Mark work ready for merge
+```
+
+## Session close protocol
+
+After completing work in any agent session, follow this sequence to commit code and bead changes cleanly:
+
+```bash
+git status                # Review changed files
+git add <files>           # Stage code changes
+bd sync                   # Commit bead changes to git
+git commit -m "..."       # Commit code changes
+bd sync                   # Commit any new bead changes
+git push                  # Push to remote
+```
+
+<Note>
+`bd sync` is idempotent — running it when there are no bead changes is safe. Always run it before and after `git commit` to ensure bead state and code changes are committed in the correct order.
+</Note>

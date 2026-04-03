@@ -1,0 +1,478 @@
+---
+title: "Convoy commands"
+description: "Reference for convoy management, bead operations, formulas, and molecules."
+---
+
+## Convoys
+
+Convoys are work-tracking units that bundle related beads (issues) and assign them to agents. They provide a single dashboard view of multi-issue work across your workspace. Convoys labeled `mountain` get autonomous stall detection and smart skip logic for epic-scale execution.
+
+### Bead ID format
+
+Bead IDs use a **prefix + 5-character alphanumeric** format:
+
+```
+gt-abc12   # a bead in the "gt" rig
+hq-x7k2m   # a town-level bead
+wyv-r9t3p  # a bead in the "wyvern" rig
+```
+
+The prefix indicates the item's origin rig. Convoy IDs follow the same format with a `cv` segment: `hq-cv-abc12`.
+
+---
+
+### `gt convoy create`
+
+Creates a new convoy, optionally seeding it with existing bead IDs. If no beads are specified, an empty convoy is created.
+
+```bash
+gt convoy create "<name>" [bead-id...]
+gt convoy create "<name>" [bead-id...] --notify
+gt convoy create "<name>" --from-epic <epic-id>
+```
+
+**Arguments:**
+
+| Argument | Description |
+|----------|-------------|
+| `name` | Display name for the convoy (quoted string) |
+| `bead-id...` | Zero or more bead IDs to include at creation time |
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--notify [address]` | Send a notification on completion. Defaults to `mayor/` if no address given |
+| `--human` | Mark convoy as human-driven (not AI-orchestrated) |
+| `--owned` | Mark convoy as caller-managed lifecycle (no automatic witness/refinery registration) |
+| `--from-epic <id>` | Auto-discover slingable child issues from an epic bead |
+| `--merge <strategy>` | Merge strategy: `mr` (default), `direct` (push to main), `local` (keep on branch) |
+| `--base-branch <name>` | Target branch for polecats (e.g., `feat/extraction-review`) |
+| `--molecule <id>` | Associate an existing molecule ID with this convoy |
+| `--owner <address>` | Owner who receives completion notification |
+
+```bash
+# Create convoy with two beads
+gt convoy create "Feature X" gt-abc12 gt-def34
+
+# Create with notification to the Mayor on completion
+gt convoy create "Auth System" gt-x7k2m gt-p9n4q --notify
+
+# Auto-populate from an epic's child issues
+gt convoy create "Epic work" --from-epic gt-epic-abc12
+
+# Create without beads (add them later)
+gt convoy create "Bug Fixes" --human
+```
+
+---
+
+### `gt convoy list`
+
+Shows the dashboard of active convoys with their progress and status.
+
+```bash
+gt convoy list
+gt convoy list --all
+gt convoy list --status=closed
+gt convoy list --tree
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Include landed (completed) convoys |
+| `--status=<value>` | Filter by status. Values: `open`, `closed` |
+| `--tree` | Show convoy with child status tree |
+| `--json` | Output as JSON |
+
+---
+
+### `gt convoy show`
+
+Shows detailed information about a specific convoy, or the current convoy if no ID is given.
+
+```bash
+gt convoy show
+gt convoy show <convoy-id>
+```
+
+---
+
+### `gt convoy add`
+
+Adds one or more bead IDs to an existing convoy.
+
+```bash
+gt convoy add <convoy-id> <bead-id...>
+```
+
+```bash
+gt convoy add hq-cv-abc gt-m3k9p gt-w5t2x
+```
+
+---
+
+### `gt convoy status`
+
+Shows progress for a specific convoy. Convoy IDs use the `hq-cv-*` format.
+
+```bash
+gt convoy status
+gt convoy status <convoy-id>
+gt convoy status <convoy-id> --json
+```
+
+---
+
+### `gt convoy refresh`
+
+Forces a refresh of convoy state. Use this when a convoy appears stuck.
+
+```bash
+gt convoy refresh <convoy-id>
+```
+
+---
+
+### `gt convoy close`
+
+Closes a convoy, optionally with a reason.
+
+```bash
+gt convoy close <convoy-id>
+gt convoy close <convoy-id> --reason "<text>"
+gt convoy close <convoy-id> --force
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--reason <text>` | Reason for closing |
+| `--notify <address>` | Agent to notify on close (e.g., `mayor/`) |
+| `-f`, `--force` | Close even if tracked issues are still open |
+
+---
+
+### `gt convoy land`
+
+Lands an owned convoy — performs caller-side cleanup of worktrees and closes the convoy.
+
+```bash
+gt convoy land <convoy-id>
+gt convoy land <convoy-id> --dry-run
+gt convoy land <convoy-id> --force
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `-f`, `--force` | Land even if tracked issues are not all closed |
+| `--keep-worktrees` | Skip worktree cleanup |
+| `--dry-run` | Show what would happen without acting |
+
+---
+
+### `gt convoy check`
+
+Checks all open convoys and auto-closes any where all tracked issues are complete.
+
+```bash
+gt convoy check
+gt convoy check --dry-run
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview which convoys would close, without acting |
+
+---
+
+### `gt convoy stranded`
+
+Finds stranded convoys that have ready issues but no workers processing them — convoys stuck, empty, or waiting.
+
+```bash
+gt convoy stranded
+gt convoy stranded --json
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+
+---
+
+## Beads (`bd`) commands
+
+The `bd` CLI manages the underlying bead (issue) database. Gas Town routes `bd` commands to the correct database based on the bead ID prefix — you never need to specify which database to target.
+
+**Routing:** Routes are defined in `~/gt/.beads/routes.jsonl`. Each rig prefix maps to its beads location.
+
+| Prefix | Routes to | Purpose |
+|--------|-----------|---------|
+| `hq-*` | `~/gt/.beads/` | Mayor mail, cross-rig coordination |
+| `gp-*` | `~/gt/greenplace/mayor/rig/.beads/` | Greenplace project issues |
+| `wyv-*` | `~/gt/wyvern/mayor/rig/.beads/` | Wyvern project issues |
+
+To debug routing: `BD_DEBUG_ROUTING=1 bd show <id>`
+
+---
+
+### `bd ready`
+
+Lists unblocked beads that are ready to work (no open dependencies).
+
+```bash
+bd ready
+```
+
+---
+
+### `bd list`
+
+Lists beads filtered by status.
+
+```bash
+bd list
+bd list --status=open
+bd list --status=in_progress
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--status=<value>` | Filter by status: `open`, `in_progress`, `closed` |
+
+---
+
+### `bd show`
+
+Shows full details for a bead, including title, description, status, priority, type, labels, and dependencies.
+
+```bash
+bd show <id>
+```
+
+```bash
+bd show gt-abc12
+```
+
+---
+
+### `bd create`
+
+Creates a new bead.
+
+```bash
+bd create --title="<title>" --type=<type>
+bd create --title="<title>" --type=<type> --priority=<n>
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--title=<text>` | Bead title (required) |
+| `--type=<type>` | Bead type (see types table below) |
+| `--priority=<n>` | Priority level (see priority table below) |
+
+**Bead types:**
+
+| Type | Description |
+|------|-------------|
+| `task` | General work item |
+| `bug` | Defect or regression |
+| `feature` | New functionality |
+| `epic` | Large body of work containing other beads |
+| `question` | Something that needs an answer before work can proceed |
+| `docs` | Documentation work |
+
+**Priority levels:**
+
+| Value | Label | Description |
+|-------|-------|-------------|
+| `0` | P0 | Critical |
+| `1` | P1 | High |
+| `2` | P2 | Medium |
+| `3` | P3 | Low |
+| `4` | P4 | Backlog |
+
+```bash
+bd create --title="Fix login redirect bug" --type=bug --priority=1
+bd create --title="Add OAuth support" --type=feature --priority=2
+```
+
+---
+
+### `bd update`
+
+Updates a bead's fields (status, priority, labels, etc.).
+
+```bash
+bd update <id> --status=<value>
+bd update <id> --labels="<key>:<value>"
+```
+
+```bash
+bd update gt-abc12 --status=in_progress
+bd update gt-rig-myrig --labels="polecat_branch_template:adam/{year}/{month}/{description}"
+```
+
+---
+
+### `bd close`
+
+Marks one or more beads as complete.
+
+```bash
+bd close <id>
+bd close <id1> <id2> <id3>
+```
+
+---
+
+### `bd dep add`
+
+Declares a dependency between two beads. `<child>` depends on `<parent>` — `<child>` will not appear in `bd ready` until `<parent>` is closed.
+
+```bash
+bd dep add <child> <parent>
+```
+
+```bash
+bd dep add gt-abc12 gt-xyz99
+```
+
+---
+
+### `bd sync`
+
+Syncs the beads database with git. Run this after closing beads at session end to commit the changes.
+
+```bash
+bd sync
+```
+
+---
+
+## Formulas and molecules
+
+Formulas are TOML workflow templates. Instantiating a formula creates a **molecule** — a tracked, multi-step workflow with checkpoint recovery.
+
+### `bd formula list`
+
+Lists all available formula templates by name and type.
+
+```bash
+bd formula list
+```
+
+---
+
+### `bd cook`
+
+Executes a formula immediately (without persistent tracking).
+
+```bash
+bd cook <formula>
+bd cook <formula> --var <key>=<value>
+```
+
+```bash
+bd cook release --var version=1.2.0
+```
+
+---
+
+### `bd mol pour`
+
+Instantiates a formula as a tracked molecule (persistent, with checkpoint recovery).
+
+```bash
+bd mol pour <formula>
+bd mol pour <formula> --var <key>=<value>
+```
+
+```bash
+bd mol pour release --var version=1.2.0
+```
+
+---
+
+### `bd mol list`
+
+Lists active molecule instances.
+
+```bash
+bd mol list
+```
+
+---
+
+### `bd mol squash`
+
+Squashes a molecule (collapses completed steps into a digest). This finalizes the molecule and frees resources.
+
+```bash
+bd mol squash <id>
+```
+
+---
+
+## Formula invocation patterns
+
+Different formula types require different invocation methods:
+
+| Formula type | Description | How to invoke |
+|--------------|-------------|---------------|
+| **Workflow** | Sequential steps, single polecat | `gt sling <formula> --on <bead-id> <rig>` |
+| **Convoy** | Parallel legs, multiple polecats | `gt formula run <formula> [--flags]` |
+
+**Identify the type before invoking:**
+
+```bash
+gt formula show <name>   # Shows "Type: convoy" or "Type: workflow"
+bd formula list          # Lists formulas by type
+```
+
+**Workflow formula example:**
+
+```bash
+gt sling shiny-enterprise --on gt-abc123 gastown
+```
+
+**Convoy formula example:**
+
+```bash
+# Correct — use gt formula run for convoy formulas
+gt formula run code-review --pr=123
+gt formula run code-review --files="src/*.go"
+
+# Dry run to preview
+gt formula run code-review --pr=123 --dry-run
+```
+
+<Warning>
+Do **not** use `gt sling` for convoy formulas. It will fail with "convoy type not supported". Convoy formulas spawn multiple polecats (one per leg) plus a synthesis step and must be dispatched with `gt formula run`.
+</Warning>
+
+---
+
+## Molecule lifecycle summary
+
+| Stage | Command | Description |
+|-------|---------|-------------|
+| Define | Formula (TOML file) | Source of truth for workflow steps |
+| Cook | `bd cook <formula>` | Execute immediately, no tracking |
+| Pour | `bd mol pour <formula>` | Instantiate as tracked molecule |
+| Work | `gt prime`, step through checklist | Agent works through steps |
+| Squash | `bd mol squash <id>` | Collapse into digest, finalize |

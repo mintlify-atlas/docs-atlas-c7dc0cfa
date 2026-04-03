@@ -1,0 +1,493 @@
+---
+title: "Agent integration"
+description: "How to integrate AI coding agents with Gas Town's multi-agent orchestration system."
+---
+
+Gas Town orchestrates agents through tmux sessions and environment variables. It does not import agent libraries or require agents to import Gas Town code. Integration is configuration, not compilation.
+
+## Integration tiers
+
+| Tier | Effort | What you get | What you provide |
+|------|--------|--------------|------------------|
+| **0: Zero** | Nothing | Basic tmux orchestration | A CLI that runs in a terminal |
+| **1: Preset** | JSON config file | Full lifecycle, resume, process detection | Preset entry in `agents.json` |
+| **2: Hooks** | Settings file or plugin | Context injection, tool guards, mail delivery | Hook installer function |
+| **3: Deep** | Code + scripts | Non-interactive mode, session forking, wrapper | Native API integration |
+
+Most agent teams should target **Tier 1** first (roughly 15 minutes of work), then **Tier 2** if their CLI supports a hooks or plugin system.
+
+## Built-in agent capability matrix
+
+| Agent | Hooks | Resume | Non-interactive | Fork session | Prompt mode |
+|-------|-------|--------|-----------------|--------------|-------------|
+| Claude | Yes (settings.json) | `--resume` (flag) | Native | Yes | `arg` |
+| Gemini | Yes | `--resume` (flag) | `-p` | No | `arg` |
+| Codex | No | `resume` (subcommand) | `exec` subcommand | No | `none` |
+| Cursor | No | `--resume` (flag) | `-p` | No | `arg` |
+| Auggie | No | `--resume` (flag) | No | No | `arg` |
+| AMP | No | `threads continue` (subcommand) | No | No | `arg` |
+| OpenCode | Yes (plugin JS) | No | `run` subcommand | No | `none` |
+| Copilot | Yes (JSON hooks) | `--resume` (flag) | No | No | `arg` |
+
+---
+
+## Tier 0: Zero integration
+
+**Any CLI that runs in a terminal works in Gas Town with zero changes.**
+
+Gas Town launches agents in tmux sessions and communicates via `send-keys`. If your agent has a REPL or accepts text input, Gas Town can start it in a pane, send work via keystroke injection, detect liveness via `pane_current_command`, and read output via `capture-pane`.
+
+This is the tmux shim layer. It works, but is timing-sensitive and has no delivery confirmation.
+
+**What you miss at Tier 0:**
+
+- No session resume — fresh session every time
+- No automatic context injection — agent does not know its Gas Town role
+- Delay-based readiness detection — Gas Town guesses when you are ready
+- No process name detection — Gas Town cannot distinguish your agent from `bash`
+
+---
+
+## Tier 1: Preset registration
+
+**JSON config only. No code changes to Gas Town or your agent.**
+
+A preset tells Gas Town everything it needs to launch, detect, resume, and communicate with your agent. You register it by creating a JSON file.
+
+### Where to put the config
+
+| Level | Path | Scope |
+|-------|------|-------|
+| Town | `~/gt/settings/agents.json` | All rigs in the town |
+| Rig | `~/gt/<rig>/settings/agents.json` | Single rig only |
+| Built-in | Compiled into `gt` binary | Ships with Gas Town |
+
+For external agent teams, **town-level** is the right choice. Users drop the config into `~/gt/settings/agents.json` and every rig can use it.
+
+### Registry schema
+
+The file is an `AgentRegistry` JSON object with `version: 1` and an `agents` map keyed by agent name:
+
+```json
+{
+  "version": 1,
+  "agents": {
+    "kiro": {
+      "name": "kiro",
+      "command": "kiro",
+      "args": ["--autonomous"],
+      "process_names": ["kiro", "node"],
+      "session_id_env": "KIRO_SESSION_ID",
+      "resume_flag": "--resume",
+      "resume_style": "flag",
+      "prompt_mode": "arg",
+      "ready_prompt_prefix": "> ",
+      "ready_delay_ms": 5000,
+      "instructions_file": "AGENTS.md",
+      "non_interactive": {
+        "prompt_flag": "-p",
+        "output_flag": "--json"
+      }
+    }
+  }
+}
+```
+
+### AgentPresetInfo field reference
+
+<AccordionGroup>
+  <Accordion title="Core fields">
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Preset identifier (e.g., `"kiro"`) |
+| `command` | string | Yes | CLI binary name or path (e.g., `"kiro"`) |
+| `args` | string[] | Yes | Default args for autonomous mode (e.g., `["--yolo"]`) |
+| `env` | map[string]string | No | Extra env vars to set (merged with `GT_*` vars) |
+| `process_names` | string[] | No | Process names for tmux liveness detection |
+| `prompt_mode` | string | No | `"arg"` (prompt as CLI arg) or `"none"` (no prompt support). Default: `"arg"` |
+| `instructions_file` | string | No | Instruction file name (default: `"AGENTS.md"`) |
+| `emits_permission_warning` | bool | No | Whether agent shows a startup permission warning |
+
+  </Accordion>
+  <Accordion title="Session and resume fields">
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_id_env` | string | No | Env var the agent sets for session ID tracking |
+| `resume_flag` | string | No | Flag or subcommand for resuming sessions |
+| `resume_style` | string | No | `"flag"` (e.g., `--resume <id>`) or `"subcommand"` (e.g., `resume <id>`) |
+| `supports_fork_session` | bool | No | Whether `--fork-session` is available |
+
+  </Accordion>
+  <Accordion title="Hooks fields">
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `supports_hooks` | bool | No | Whether the agent has a hooks or plugin system |
+| `hooks_provider` | string | No | Hooks framework identifier (for Tier 2) |
+| `hooks_dir` | string | No | Directory for hooks or settings files |
+| `hooks_settings_file` | string | No | Settings or plugin filename |
+| `hooks_informational` | bool | No | `true` if hooks are instructions-only (not executable) |
+
+  </Accordion>
+  <Accordion title="Config and readiness fields">
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `config_dir_env` | string | No | Env var for agent's config directory |
+| `config_dir` | string | No | Top-level config dir name (e.g., `".kiro"`) |
+| `ready_prompt_prefix` | string | No | Prompt string for readiness detection (e.g., `"❯ "`) |
+| `ready_delay_ms` | int | No | Fallback delay for readiness (milliseconds) |
+
+  </Accordion>
+  <Accordion title="Non-interactive config (non_interactive object)">
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | string | Subcommand for non-interactive execution (e.g., `"exec"`) |
+| `prompt_flag` | string | Flag for passing prompts (e.g., `"-p"`) |
+| `output_flag` | string | Flag for structured output (e.g., `"--json"`) |
+
+  </Accordion>
+</AccordionGroup>
+
+### Activating a custom preset
+
+Once the JSON file exists, configure a rig or the whole town to use it.
+
+**Rig-level** (`~/gt/<rig>/settings/config.json`):
+
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "agent": "kiro"
+}
+```
+
+**Town-wide default** (`~/gt/settings/config.json`):
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "kiro"
+}
+```
+
+**Per-role assignment** (cost optimization — run cheaper agents for lightweight roles):
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "claude",
+  "role_agents": {
+    "witness": "kiro",
+    "polecat": "kiro"
+  }
+}
+```
+
+### Config resolution order
+
+When Gas Town starts an agent session, it resolves config through this chain:
+
+1. Role-specific override (`role_agents[role]` in rig settings)
+2. Role-specific override (`role_agents[role]` in town settings)
+3. Rig's `agent` field
+4. Town's `default_agent` field
+5. Built-in fallback: `"claude"`
+
+At each step, the agent name is looked up in rig custom agents, then town custom agents, then built-in presets. Your JSON preset is found automatically — no code change required.
+
+---
+
+## Tier 2: Hooks integration
+
+Hooks let Gas Town inject context into your agent at session start, guard tool calls, and deliver mail. Choose a pattern based on what your agent supports.
+
+<Tabs>
+  <Tab title="Pattern A — settings.json">
+
+**Use this when your agent supports a `settings.json` with lifecycle hooks** (like Claude Code or Gemini CLI).
+
+Gas Town installs hooks that run `gt prime` and `gt mail check` at the right moments.
+
+| Hook | Event | Command |
+|------|-------|---------|
+| `SessionStart` | Agent session begins | `gt prime --hook && gt mail check --inject` |
+| `PreCompact` | Before context compaction | `gt prime --hook` |
+| `UserPromptSubmit` | User sends a message | `gt mail check --inject` |
+| `PreToolUse` | Before tool execution | `gt tap guard pr-workflow` |
+| `Stop` | Session ends | `gt costs record` |
+
+Example settings file:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gt prime --hook && gt mail check --inject"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gt mail check --inject"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+To integrate, set `hooks_provider`, `hooks_dir`, and `hooks_settings_file` in your preset, then register a `HookInstallerFunc` in `internal/runtime/runtime.go`:
+
+```go
+config.RegisterHookInstaller("your-agent", func(settingsDir, workDir, role, hooksDir, hooksFile string) error {
+    return youragent.EnsureSettingsForRoleAt(settingsDir, role, hooksDir, hooksFile)
+})
+```
+
+  </Tab>
+  <Tab title="Pattern B — plugin/script">
+
+**Use this when your agent uses a plugin system** (like OpenCode's JavaScript plugins).
+
+Gas Town installs a plugin file that listens for session events and calls `gt prime` and `gt mail check`:
+
+```javascript
+export const GasTown = async ({ $, directory }) => {
+  const role = (process.env.GT_ROLE || "").toLowerCase();
+  const autonomousRoles = new Set(["polecat", "witness", "refinery", "deacon"]);
+
+  const run = async (cmd) => {
+    try {
+      await $`/bin/sh -lc ${cmd}`.cwd(directory);
+    } catch (err) {
+      console.error(`[gastown] ${cmd} failed`, err?.message || err);
+    }
+  };
+
+  const injectContext = async () => {
+    await run("gt prime");
+    if (autonomousRoles.has(role)) {
+      await run("gt mail check --inject");
+    }
+  };
+
+  return {
+    event: async ({ event }) => {
+      if (event?.type === "session.created") await injectContext();
+      if (event?.type === "session.compacted") await injectContext();
+    },
+  };
+};
+```
+
+The underlying commands (`gt prime`, `gt mail check --inject`) are agent-agnostic. Only the delivery mechanism adapts to the agent's plugin API.
+
+  </Tab>
+  <Tab title="Pattern C — informational">
+
+**Use this when your agent reads a static instructions or context file** but does not support executable hooks.
+
+Gas Town installs a markdown file with startup instructions:
+
+```markdown
+# Gas Town Agent Context
+
+You are running inside Gas Town, a multi-agent workspace manager.
+
+## Startup Protocol
+
+On session start or after compaction, run:
+```
+gt prime
+```
+This loads your full role context, mail, and pending work.
+```
+
+Set `hooks_informational: true` in your preset. Gas Town will then send `gt prime` via a tmux nudge as a fallback, since hooks won't run automatically.
+
+**The startup fallback matrix:**
+
+| Has hooks | Has prompt | Context source | Work instructions |
+|-----------|------------|----------------|-------------------|
+| Yes | Yes | Hook runs `gt prime` | In CLI prompt arg |
+| Yes | No | Hook runs `gt prime` | Sent via nudge |
+| No | Yes | "Run `gt prime`" in prompt | Delayed nudge |
+| No | No | "Run `gt prime`" via nudge | Delayed nudge |
+
+Agents with hooks get the most reliable experience. Without hooks, Gas Town falls back to tmux-based delivery with timing heuristics.
+
+  </Tab>
+</Tabs>
+
+---
+
+## Tier 3: Deep integration
+
+These optional capabilities unlock advanced orchestration features.
+
+### Non-interactive mode
+
+Used by Gas Town's formula system and infrastructure helpers for headless execution. Configure via the `non_interactive` preset field:
+
+```json
+{
+  "non_interactive": {
+    "subcommand": "exec",
+    "prompt_flag": "-p",
+    "output_flag": "--json"
+  }
+}
+```
+
+Gas Town builds the command as: `your-agent exec -p "prompt" --json`. This enables your agent for formula execution and dog tasks.
+
+### Session forking
+
+If your agent supports forking a past session (creating a read-only copy for inspection), set `supports_fork_session: true`. Used by the `gt seance` command for querying past agent sessions.
+
+### Wrapper scripts
+
+For agents with no hooks support at all, a wrapper script can inject Gas Town context before launching the agent:
+
+```bash
+#!/bin/bash
+set -e
+
+if command -v gt &>/dev/null; then
+    gt prime 2>/dev/null || true
+fi
+
+exec your-agent "$@"
+```
+
+Install the wrapper as `gt-youragent` in your PATH. Users run it in place of the agent binary, and Gas Town sets up context before the agent starts.
+
+---
+
+## Step-by-step: integrate your agent
+
+<Steps>
+  <Step title="Create the preset file">
+    Create `~/gt/settings/agents.json` (or add to an existing file):
+
+    ```json
+    {
+      "version": 1,
+      "agents": {
+        "your-agent": {
+          "name": "your-agent",
+          "command": "your-agent-cli",
+          "args": ["--autonomous", "--no-confirm"],
+          "process_names": ["your-agent-cli"],
+          "prompt_mode": "arg",
+          "ready_delay_ms": 5000,
+          "instructions_file": "AGENTS.md"
+        }
+      }
+    }
+    ```
+  </Step>
+  <Step title="Test basic launch">
+    Set your agent as default for a rig and verify it starts correctly:
+
+    ```bash
+    # Set for a specific rig
+    gt config set agent your-agent --rig <rigname>
+
+    # Or test with a one-off override
+    gt crew start jack --agent your-agent
+    ```
+
+    Verify that the agent starts in a tmux pane, `gt prime` content is delivered, and the agent can receive nudges:
+
+    ```bash
+    gt nudge <rig>/crew/jack "hello"
+    ```
+  </Step>
+  <Step title="Add session resume">
+    If your agent supports sessions, add resume config to the preset:
+
+    ```json
+    {
+      "session_id_env": "YOUR_AGENT_SESSION_ID",
+      "resume_flag": "--resume",
+      "resume_style": "flag"
+    }
+    ```
+
+    Test by starting a session, noting the session ID, killing the tmux pane, and verifying the agent resumes with context on restart.
+  </Step>
+  <Step title="Add hooks">
+    Choose Pattern A, B, or C from the hooks section above based on what your agent supports.
+
+    For agents that support Claude-compatible `settings.json`:
+    1. Set `hooks_provider`, `hooks_dir`, and `hooks_settings_file` in the preset
+    2. Register a `HookInstallerFunc` in your agent's Go package
+    3. Register it in `internal/runtime/runtime.go`'s `init()`
+
+    For agents that read a custom instructions file:
+    1. Set `hooks_informational: true` in the preset
+    2. Set `hooks_dir` and `hooks_settings_file` to point to your instructions file
+    3. Register a hook installer that writes the Gas Town instructions
+  </Step>
+</Steps>
+
+---
+
+## Common integration mistakes
+
+<AccordionGroup>
+  <Accordion title="Hardcoding into Gas Town internals">
+    Adding your agent as a Go constant in `agents.go`, adding switch cases in `types.go`, or modifying `runtime.go` directly creates tight coupling. Your agent becomes a build-time dependency. Use the JSON registry (`settings/agents.json`) instead — it is loaded at runtime with no build step required.
+  </Accordion>
+  <Accordion title="Modifying default resolution functions">
+    The `default*()` functions in `types.go` resolve values from the preset registry. Adding agent-specific cases here means every Gas Town release must include your agent's defaults. The preset struct has fields for all these values — set them in your JSON preset instead.
+  </Accordion>
+  <Accordion title="Forking hook templates">
+    Copying and modifying Claude's `settings-autonomous.json` for your agent creates a maintenance burden. The hook commands (`gt prime`, `gt mail check`) are agent-agnostic. Adapt them to your agent's hook format, but don't change the underlying commands.
+  </Accordion>
+  <Accordion title="Coupling to Gas Town's internal module structure">
+    Importing Gas Town Go packages or depending on internal data structures means your integration breaks when Gas Town refactors. The stable public interface is:
+
+    - `gt` CLI commands (`gt prime`, `gt mail`, `gt hook`, etc.)
+    - Environment variables (`GT_ROLE`, `GT_RIG`, `GT_ROOT`, `BD_ACTOR`)
+    - JSON config files (`settings/agents.json`)
+  </Accordion>
+  <Accordion title="Skipping the preset for direct RuntimeConfig hacks">
+    The `RuntimeConfig` in rig `settings/config.json` is a backwards-compatibility path. The modern approach is preset registration. `RuntimeConfig` works but misses session resume, process detection, and non-interactive mode, which are only available through `AgentPresetInfo`.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Environment variables set by Gas Town
+
+When Gas Town launches an agent session, the following environment variables are available to the agent process:
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `GT_ROLE` | `gastown/crew/jack` | Agent's role in the system |
+| `GT_RIG` | `gastown` | Which rig the agent belongs to |
+| `GT_ROOT` | `/Users/me/gt` | Town root directory |
+| `BD_ACTOR` | `gastown/crew/jack` | Beads identity for issue tracking |
+| `GIT_AUTHOR_NAME` | `gastown/crew/jack` | Git commit identity |
+| `GT_AGENT` | `kiro` | Which agent preset is active |
+| `GT_SESSION_ID_ENV` | `KIRO_SESSION_ID` | Which env var holds the session ID |

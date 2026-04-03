@@ -1,0 +1,259 @@
+---
+title: "Agent presets"
+description: "Reference for built-in agent presets, the AgentPresetInfo schema, custom preset creation, and agent resolution order."
+---
+
+An agent preset is a named configuration bundle that tells Gas Town how to launch, detect, resume, and communicate with a specific AI coding agent CLI. Gas Town ships with built-in presets for popular agents and supports user-defined presets via JSON files.
+
+---
+
+## Built-in presets
+
+The following presets are compiled into the `gt` binary and available in every workspace.
+
+| Name | Agent CLI | Autonomous flag | Resume style |
+|------|-----------|-----------------|--------------|
+| `claude` | Claude Code (`claude`) | `--dangerously-skip-permissions` | `--resume` (flag) |
+| `gemini` | Gemini CLI (`gemini`) | built-in | `--resume` (flag) |
+| `codex` | Codex CLI (`codex`) | `--dangerously-bypass-approvals-and-sandbox` | `resume` (subcommand) |
+| `cursor` | Cursor agent (`cursor-agent`) | — | `--resume` (flag) |
+| `auggie` | Augment Code (`auggie`) | — | `--resume` (flag) |
+| `amp` | AMP (`amp`) | — | `threads continue` (subcommand) |
+| `opencode` | OpenCode (`opencode`) | — | `--session` (flag) |
+| `copilot` | GitHub Copilot CLI (`copilot`) | `--yolo` | `--resume` (flag) |
+| `pi` | Pi agent (`pi`) | — | — |
+| `omp` | OMP agent (`omp`) | — | — |
+
+List all available presets (built-in and custom):
+
+```bash
+gt config agent list
+gt config agent list --json
+```
+
+Show the resolved configuration for a specific preset:
+
+```bash
+gt config agent get opencode
+```
+
+<Note>
+Built-in presets cannot be removed, but they can be overridden. Defining an entry with the same name in `~/gt/settings/agents.json` replaces the built-in for your workspace.
+</Note>
+
+---
+
+## `AgentPresetInfo` field reference
+
+Every field from the `AgentPresetInfo` struct (`internal/config/agents.go`). This is the schema for entries in the `agents` map in your JSON registry file.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Preset identifier (e.g., `"kiro"`). Must match the key in the `agents` map. |
+| `command` | `string` | Yes | CLI binary name or path to invoke (e.g., `"kiro"`) |
+| `args` | `string[]` | Yes | Default arguments for autonomous mode (e.g., `["--yolo"]`) |
+| `env` | `map[string]string` | No | Extra environment variables merged with Gas Town's `GT_*` variables |
+| `process_names` | `string[]` | No | Process names for tmux liveness detection via `pane_current_command`. Include both the binary name and any interpreter (e.g., `["node", "kiro"]`) |
+| `session_id_env` | `string` | No | Env var the agent sets to store its session ID (used for resume) |
+| `resume_flag` | `string` | No | Flag or subcommand for resuming a previous session |
+| `resume_style` | `string` | No | `"flag"` (e.g., `--resume <id>`) or `"subcommand"` (e.g., `resume <id>`) |
+| `supports_hooks` | `bool` | No | Whether the agent has a hooks or plugin system that Gas Town can use for context injection |
+| `supports_fork_session` | `bool` | No | Whether `--fork-session` is supported. Enables `gt seance` to query past sessions. |
+| `non_interactive` | `object` | No | Configuration for headless/non-interactive execution (see below) |
+| `prompt_mode` | `string` | No | `"arg"` (prompt passed as CLI argument) or `"none"` (no prompt argument supported). Default: `"arg"` |
+| `config_dir_env` | `string` | No | Env var that sets the agent's config directory |
+| `config_dir` | `string` | No | Top-level config directory name (e.g., `".kiro"`). Gas Town provisions slash commands here. |
+| `hooks_provider` | `string` | No | Hooks framework identifier for Tier 2 integration (e.g., `"copilot"`) |
+| `hooks_dir` | `string` | No | Directory for hooks or settings files (e.g., `".github/hooks"`) |
+| `hooks_settings_file` | `string` | No | Filename for the hooks or settings file (e.g., `"gastown.json"`) |
+| `hooks_informational` | `bool` | No | `true` if hooks are instructions-only (not executable). Gas Town falls back to tmux nudge delivery for context injection. |
+| `ready_prompt_prefix` | `string` | No | Prompt string Gas Town scans for to detect readiness (e.g., `"❯ "`). Preferred over delay when available. |
+| `ready_delay_ms` | `int` | No | Fallback delay in milliseconds before Gas Town treats the session as ready. Used when a detectable prompt prefix is unavailable. |
+| `instructions_file` | `string` | No | Instruction file name. Default: `"AGENTS.md"` |
+| `emits_permission_warning` | `bool` | No | Whether the agent emits a startup permission warning that Gas Town should expect |
+
+### `NonInteractiveConfig` fields
+
+The `non_interactive` object configures headless execution used by the formula system and Dog agents.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subcommand` | `string` | Subcommand for non-interactive execution (e.g., `"exec"`) |
+| `prompt_flag` | `string` | Flag for passing prompts in headless mode (e.g., `"-p"`) |
+| `output_flag` | `string` | Flag for requesting structured output (e.g., `"--json"`) |
+
+Gas Town builds the invocation as: `<command> <subcommand> <prompt_flag> "<prompt>" <output_flag>`
+
+---
+
+## Creating a custom preset
+
+Custom presets are defined in a JSON registry file. You can use the CLI for simple aliases, or write JSON directly for full control.
+
+### Simple alias (CLI)
+
+```bash
+gt config agent set codex-low "codex --thinking low"
+gt config agent set claude-haiku "claude --model haiku --dangerously-skip-permissions"
+gt config default-agent codex-low
+```
+
+### Full preset (JSON)
+
+Create or edit `~/gt/settings/agents.json`:
+
+```json
+{
+  "version": 1,
+  "agents": {
+    "kiro": {
+      "name": "kiro",
+      "command": "kiro",
+      "args": ["--autonomous"],
+      "process_names": ["kiro", "node"],
+      "session_id_env": "KIRO_SESSION_ID",
+      "resume_flag": "--resume",
+      "resume_style": "flag",
+      "prompt_mode": "arg",
+      "ready_prompt_prefix": "> ",
+      "ready_delay_ms": 5000,
+      "instructions_file": "AGENTS.md",
+      "non_interactive": {
+        "prompt_flag": "-p",
+        "output_flag": "--json"
+      }
+    }
+  }
+}
+```
+
+The `version` field must be `1`. The `agents` map keys become the agent names used in rig and town config.
+
+### Built-in Copilot preset
+
+The `copilot` preset ships built-in and uses executable lifecycle hooks via `.github/hooks/gastown.json`:
+
+```json
+{
+  "name": "copilot",
+  "command": "copilot",
+  "args": ["--yolo"],
+  "process_names": ["copilot"],
+  "resume_flag": "--resume",
+  "resume_style": "flag",
+  "ready_delay_ms": 5000,
+  "hooks_provider": "copilot",
+  "hooks_dir": ".github/hooks",
+  "hooks_settings_file": "gastown.json",
+  "instructions_file": "AGENTS.md"
+}
+```
+
+Gas Town provisions `.github/hooks/gastown.json` with the standard lifecycle hooks (`sessionStart`, `userPromptSubmitted`, `preToolUse`, `sessionEnd`) in Copilot's JSON format.
+
+<Warning>
+GitHub Copilot requires a Copilot seat and must be enabled at two policy levels before use:
+
+1. Enterprise → Settings → AI controls → Copilot → **"Copilot in the CLI" = Enabled**
+2. Org → Settings → Copilot → Policies → **"Copilot in the CLI" = Enabled**
+</Warning>
+
+---
+
+## Activating a preset
+
+Set a preset for an entire rig in `~/gt/<rig>/settings/config.json`:
+
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "agent": "kiro"
+}
+```
+
+Set a town-wide default in `~/gt/settings/config.json`:
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "kiro"
+}
+```
+
+Or pass it per-command without changing any defaults:
+
+```bash
+gt start --agent kiro
+gt sling gt-abc12 myproject --agent kiro
+gt crew at myname --agent kiro
+```
+
+---
+
+## Per-role agent assignment
+
+Assign different agents to different roles for cost optimization. Role assignments in `role_agents` take priority over the `default_agent` or rig's `agent` field.
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "claude",
+  "role_agents": {
+    "witness": "claude-haiku",
+    "polecat": "claude-haiku"
+  }
+}
+```
+
+---
+
+## ACP-enabled custom agents
+
+The `acp` field configures Agent Communication Protocol support for agents that support it:
+
+```json
+{
+  "type": "town-settings",
+  "version": 1,
+  "default_agent": "opencode-acp-debug",
+  "agents": {
+    "opencode-acp-debug": {
+      "command": "opencode",
+      "acp": {
+        "command": "acp",
+        "args": ["--debug", "--print-logs"]
+      }
+    }
+  }
+}
+```
+
+| `acp` field | Description |
+|-------------|-------------|
+| `command` | ACP subcommand (e.g., `"acp"` invokes `opencode acp`) |
+| `args` | Additional arguments passed to the ACP subcommand |
+
+Custom agents inherit ACP support from their base command's preset. A custom agent with `"command": "opencode"` automatically inherits ACP support from the built-in `opencode` preset. Override by specifying `acp` explicitly.
+
+---
+
+## Agent resolution order
+
+When Gas Town starts a session, it resolves the agent through this chain:
+
+1. Role-specific override (`role_agents[role]` in rig settings)
+2. Role-specific override (`role_agents[role]` in town settings)
+3. Rig's `agent` field
+4. Town's `default_agent` field
+5. Built-in fallback: `"claude"`
+
+At each step, the agent name is looked up in:
+
+1. Rig's custom agents (`<rig>/settings/agents.json`)
+2. Town's custom agents (`~/gt/settings/agents.json`)
+3. Built-in presets (compiled into `gt`)
+
+User-defined agents in `settings/agents.json` take precedence over built-in presets with the same name, so you can override `"claude"` or any other built-in if needed.

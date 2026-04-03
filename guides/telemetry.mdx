@@ -1,0 +1,284 @@
+---
+title: "Telemetry"
+description: "OpenTelemetry metrics and structured logging for Gas Town — what is emitted, how to configure endpoints, and the full event schema."
+---
+
+Gas Town emits all agent operations as structured log records and metrics to any OTLP-compatible backend. Every record carries a `run.id` attribute — a UUID generated once per agent spawn — so all events from a single session can be retrieved and correlated.
+
+<Note>
+  Telemetry is opt-in via environment variables. Gas Town does not send any data unless you configure `GT_OTEL_LOGS_URL` and/or `GT_OTEL_METRICS_URL`. The default backend referenced in this guide is VictoriaMetrics and VictoriaLogs, but any OTLP-compatible backend works.
+</Note>
+
+---
+
+## Configuration
+
+Set these environment variables before starting Gas Town to enable telemetry:
+
+```bash
+export GT_OTEL_LOGS_URL="http://localhost:9428/insert/jsonline"
+export GT_OTEL_METRICS_URL="http://localhost:8428/api/v1/write"
+```
+
+Gas Town uses the OTLP protocol. You can point these at any OTLP-compatible backend — VictoriaMetrics/VictoriaLogs, Grafana Tempo, Honeycomb, Datadog, or any OpenTelemetry Collector.
+
+### All telemetry environment variables
+
+| Variable | Set by | Description |
+|----------|--------|-------------|
+| `GT_OTEL_LOGS_URL` | Daemon startup | OTLP logs endpoint URL |
+| `GT_OTEL_METRICS_URL` | Daemon startup | OTLP metrics endpoint URL |
+| `GT_RUN` | tmux session + subprocess | Run UUID; correlation key across all events |
+| `GT_LOG_AGENT_OUTPUT` | Operator | Opt-in: stream agent conversation events (content truncated to 512 bytes) |
+| `GT_LOG_AGENT_CONTENT_LIMIT` | Operator | Override content truncation in `agent.event`; set `0` to disable |
+| `GT_LOG_BD_OUTPUT` | Operator | Opt-in: include `bd` stdout/stderr in `bd.call` records |
+| `GT_LOG_PANE_OUTPUT` | Operator | Opt-in: stream raw tmux pane output |
+| `GT_LOG_MAIL_BODY` | Operator | Opt-in: include mail body in `mail` records (truncated to 256 bytes) |
+| `GT_LOG_PROMPT_KEYS` | Operator | Opt-in: include prompt text in `prompt.send` records (truncated to 256 bytes) |
+| `GT_LOG_PRIME_CONTEXT` | Operator | Opt-in: log full rendered formula in `prime.context` records |
+
+---
+
+## Key metrics
+
+| Metric | Description |
+|--------|-------------|
+| `gastown.session.starts.total` | Total agent sessions started |
+| `gastown.bd.calls.total` | Total `bd` CLI invocations |
+| `gastown.polecat.spawns.total` | Total polecat worker agents spawned |
+| `gastown.done.total` | Total work completions (`gt done`) |
+| `gastown.convoy.creates.total` | Total convoys created |
+
+---
+
+## Identity hierarchy
+
+Every OTel record includes a consistent set of identity attributes.
+
+**Instance** — derived at agent spawn from the machine hostname and town root directory basename:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `instance` | string | `hostname:basename(town_root)` — e.g. `"laptop:gt"` |
+| `town_root` | string | Absolute path to the town root |
+
+**Run** — each agent spawn generates one `run.id` UUID, propagated via `GT_RUN`:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `run.id` | string (UUID v4) | Correlation key for all events in a session |
+| `agent_type` | string | `"claudecode"`, `"opencode"`, `"copilot"`, etc. |
+| `role` | string | `polecat`, `witness`, `mayor`, `refinery`, `crew`, `deacon`, `dog`, `boot` |
+| `agent_name` | string | Specific name within the role; equals role for singletons |
+| `session_id` | string | tmux pane name |
+| `rig` | string | Rig name; empty for town-level agents |
+
+---
+
+## Events emitted
+
+<AccordionGroup>
+  <Accordion title="agent.instantiate — agent spawn">
+    Emitted once per agent spawn. Anchors all subsequent events for that run.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `agent_type` | string | Agent type identifier |
+    | `role` | string | Gas Town role |
+    | `agent_name` | string | Agent name |
+    | `session_id` | string | tmux pane name |
+    | `rig` | string | Rig name (empty = town-level) |
+    | `issue_id` | string | Bead ID of the work item assigned |
+    | `git_branch` | string | Git branch at spawn time |
+    | `git_commit` | string | HEAD SHA at spawn time |
+  </Accordion>
+
+  <Accordion title="session.start / session.stop — session lifecycle">
+    tmux session lifecycle events.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `session_id` | string | tmux pane name |
+    | `role` | string | Gas Town role |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="agent.state_change — state transitions">
+    Emitted whenever an agent transitions between states (idle → working, etc.).
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `agent_id` | string | Agent identifier |
+    | `new_state` | string | New state (`"idle"`, `"working"`, `"done"`, etc.) |
+    | `hook_bead` | string | Bead ID the agent is processing; empty if none |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="bd.call — beads CLI invocations">
+    Each invocation of the `bd` CLI, whether by the Go daemon or by an agent in a shell.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `subcommand` | string | `bd` subcommand (`"ready"`, `"update"`, `"create"`, etc.) |
+    | `args` | string | Full argument list |
+    | `duration_ms` | float | Wall-clock duration in milliseconds |
+    | `stdout` | string | Full stdout (opt-in: `GT_LOG_BD_OUTPUT=true`) |
+    | `stderr` | string | Full stderr (opt-in: `GT_LOG_BD_OUTPUT=true`) |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="mail — mail system operations">
+    All operations on the Gas Town mail system.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `operation` | string | `"send"`, `"read"`, `"archive"`, `"list"`, `"delete"`, etc. |
+    | `msg.id` | string | Message identifier |
+    | `msg.from` | string | Sender address |
+    | `msg.to` | string | Recipient(s), comma-separated |
+    | `msg.subject` | string | Subject |
+    | `msg.body` | string | Message body (opt-in: `GT_LOG_MAIL_BODY=true`; truncated to 256 bytes) |
+    | `msg.thread_id` | string | Thread ID |
+    | `msg.priority` | string | `"high"`, `"normal"`, or `"low"` |
+    | `msg.type` | string | Message type (`"work"`, `"notify"`, `"queue"`, etc.) |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="prime — context injection">
+    Emitted on each `gt prime` invocation. The rendered formula is emitted separately as `prime.context` with the same attributes plus `formula`.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `role` | string | Gas Town role |
+    | `hook_mode` | bool | `true` when invoked from a hook |
+    | `formula` | string | Full rendered formula (`prime.context` only) |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="prompt.send — tmux key dispatch">
+    Each `gt sendkeys` dispatch to an agent's tmux pane.
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `session` | string | tmux pane name |
+    | `keys` | string | Prompt text (opt-in: `GT_LOG_PROMPT_KEYS=true`; truncated to 256 bytes) |
+    | `keys_len` | int | Prompt length in bytes |
+    | `debounce_ms` | int | Applied debounce delay |
+    | `status` | string | `"ok"` · `"error"` |
+  </Accordion>
+
+  <Accordion title="agent.event / agent.usage — conversation log (opt-in)">
+    Only emitted when `GT_LOG_AGENT_OUTPUT=true`.
+
+    **`agent.event`** — one record per content block:
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `run.id` | string | Run UUID |
+    | `session` | string | tmux pane name |
+    | `native_session_id` | string | Agent-native session UUID |
+    | `agent_type` | string | Adapter name |
+    | `event_type` | string | `"text"`, `"tool_use"`, `"tool_result"`, `"thinking"` |
+    | `role` | string | `"assistant"` or `"user"` |
+    | `content` | string | Content truncated to 512 bytes |
+
+    **`agent.usage`** — one record per assistant turn (not per content block):
+
+    | Attribute | Type | Description |
+    |-----------|------|-------------|
+    | `input_tokens` | int | Input tokens from API usage |
+    | `output_tokens` | int | Output tokens from API usage |
+    | `cache_read_tokens` | int | Cache read input tokens |
+    | `cache_creation_tokens` | int | Cache creation input tokens |
+  </Accordion>
+
+  <Accordion title="Molecule lifecycle — mol.cook / mol.wisp / mol.squash / mol.burn">
+    Formula workflow events emitted at each stage.
+
+    **`mol.cook`** — formula compiled to a proto:
+
+    | Attribute | Description |
+    |-----------|-------------|
+    | `formula_name` | Formula name (e.g., `"mol-polecat-work"`) |
+    | `status` | `"ok"` · `"error"` |
+
+    **`mol.wisp`** — proto instantiated as a live wisp:
+
+    | Attribute | Description |
+    |-----------|-------------|
+    | `formula_name` | Formula name |
+    | `wisp_root_id` | Root bead ID of the created wisp |
+    | `bead_id` | Base bead bonded to the wisp; empty for standalone formula slinging |
+
+    **`mol.squash`** — execution completed and collapsed to a digest:
+
+    | Attribute | Description |
+    |-----------|-------------|
+    | `mol_id` | Molecule root bead ID |
+    | `done_steps` | Number of steps completed |
+    | `total_steps` | Total steps in the molecule |
+    | `digest_created` | `false` when `--no-digest` flag was set |
+
+    **`mol.burn`** — molecule destroyed without creating a digest:
+
+    | Attribute | Description |
+    |-----------|-------------|
+    | `mol_id` | Molecule root bead ID |
+    | `children_closed` | Number of descendant step beads closed |
+  </Accordion>
+
+  <Accordion title="Other events">
+    All events carry `run.id`.
+
+    | Event | Key attributes |
+    |-------|----------------|
+    | `sling` | `bead`, `target`, `status` |
+    | `nudge` | `target`, `status` |
+    | `done` | `exit_type` (`COMPLETED`, `ESCALATED`, `DEFERRED`), `status` |
+    | `polecat.spawn` | `name`, `status` |
+    | `polecat.remove` | `name`, `status` |
+    | `formula.instantiate` | `formula_name`, `bead_id`, `status` |
+    | `convoy.create` | `bead_id`, `status` |
+    | `daemon.restart` | `agent_type` |
+    | `bead.create` | `bead_id`, `parent_id`, `mol_source` |
+    | `pane.output` | `session`, `content` (opt-in: `GT_LOG_PANE_OUTPUT=true`) |
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Recommended indexed attributes
+
+For efficient querying, index these attributes in your backend:
+
+```
+run.id, instance, town_root, session_id, rig, role, agent_type,
+event_type, msg.thread_id, msg.from, msg.to
+```
+
+---
+
+## Example: VictoriaMetrics + VictoriaLogs
+
+Gas Town's default backend is VictoriaMetrics for metrics and VictoriaLogs for structured logs. To configure:
+
+```bash
+# Metrics endpoint (Prometheus remote write format)
+export GT_OTEL_METRICS_URL="http://localhost:8428/api/v1/write"
+
+# Logs endpoint (OTLP/HTTP)
+export GT_OTEL_LOGS_URL="http://localhost:9428/insert/jsonline"
+```
+
+<Tip>
+  VictoriaMetrics and VictoriaLogs are the reference backend, but Gas Town uses standard OTLP. Any OTLP-compatible system works — Grafana, Honeycomb, Datadog, or a local OpenTelemetry Collector configured as a relay.
+</Tip>
+
+The `GT_RUN` value is also surfaced as `gt.run_id` in `OTEL_RESOURCE_ATTRIBUTES` for `bd` subprocesses, correlating their own telemetry to the parent run.
